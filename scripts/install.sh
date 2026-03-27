@@ -180,7 +180,8 @@ ok "OpenClaw config updated"
 
 # ── Restart gateway ───────────────────────────────────────────
 echo "🔄 Restart OpenClaw gateway..."
-openclaw gateway restart
+openclaw gateway install 2>/dev/null || true
+openclaw gateway restart 2>/dev/null || openclaw gateway 2>/dev/null &
 sleep 5
 
 # ── Kiểm tra ─────────────────────────────────────────────────
