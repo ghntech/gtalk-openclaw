@@ -49,6 +49,11 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
+# ── Install dependencies ─────────────────────────────────────
+echo "📦 Cài dependencies..."
+(cd "$PLUGIN_DIR" && npm install --omit dev) || err "npm install thất bại"
+ok "Dependencies installed"
+
 # ── Install plugin ───────────────────────────────────────────
 echo " Cài plugin..."
 # Xóa channels.gtalk-openclaw khỏi config trước để tránh validation lỗi khi uninstall
