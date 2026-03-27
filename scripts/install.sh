@@ -75,7 +75,7 @@ RMCHAN
 # Uninstall plugin cũ và xóa thư mục
 openclaw plugins uninstall gtalk-openclaw 2>/dev/null || true
 rm -rf "$HOME/.openclaw/extensions/gtalk-openclaw" 2>/dev/null || true
-openclaw plugins install "$PLUGIN_DIR" || err "Cài plugin thất bại"
+openclaw plugins install --link "$PLUGIN_DIR" || err "Cài plugin thất bại"
 ok "Plugin installed"
 
 # ── Bật Tailscale Funnel ─────────────────────────────────────
