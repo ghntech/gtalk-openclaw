@@ -51,6 +51,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "📦 Cài plugin..."
+# Uninstall nếu đã tồn tại
+openclaw plugins uninstall gtalk-openclaw 2>/dev/null || true
 openclaw plugins install "$PLUGIN_DIR" || err "Cài plugin thất bại"
 ok "Plugin installed"
 
