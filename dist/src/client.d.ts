@@ -1,7 +1,8 @@
 export interface GtalkResponse<T> {
     data: T | null;
     errorCode: string;
-    error: {
+    errorMessage?: string;
+    error?: {
         errorMessage?: string;
     };
 }

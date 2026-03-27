@@ -6,7 +6,8 @@ import { getImageMeta, getVideoMeta, makeThumbnail } from "./media-meta.js";
 export interface GtalkResponse<T> {
   data: T | null;
   errorCode: string;
-  error: { errorMessage?: string };
+  errorMessage?: string;
+  error?: { errorMessage?: string };
 }
 
 export interface SendMessageResult {
@@ -81,9 +82,8 @@ export class GtalkClient {
     const json = (await res.json()) as GtalkResponse<T>;
 
     if (json.errorCode !== "success") {
-      throw new Error(
-        `GTalk API error [${json.errorCode}]: ${json.error?.errorMessage ?? "unknown error"}`,
-      );
+      const msg = json.errorMessage ?? json.error?.errorMessage ?? "unknown error";
+      throw new Error(`GTalk API error [${json.errorCode}]: ${msg}`);
     }
 
     return json.data as T;

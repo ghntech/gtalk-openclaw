@@ -17,7 +17,8 @@ export class GtalkClient {
         });
         const json = (await res.json());
         if (json.errorCode !== "success") {
-            throw new Error(`GTalk API error [${json.errorCode}]: ${json.error?.errorMessage ?? "unknown error"}`);
+            const msg = json.errorMessage ?? json.error?.errorMessage ?? "unknown error";
+            throw new Error(`GTalk API error [${json.errorCode}]: ${msg}`);
         }
         return json.data;
     }
