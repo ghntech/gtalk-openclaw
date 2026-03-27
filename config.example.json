@@ -1,0 +1,21 @@
+{
+  "plugins": {
+    "entries": {
+      "gtalk-openclaw": {
+        "enabled": true,
+        "config": {
+          "webhookSecret": "WEBHOOK_SECRET_CHUNG_VỚI_GTALK"
+        }
+      }
+    }
+  },
+  "channels": {
+    "gtalk-openclaw": {
+      "oaToken": "OA_ID:OA_PASSWORD",
+      "apiUrl": "https://mbff.ghn.vn",
+      "allowFrom": [
+        "GTALK_USER_ID_ĐƯỢC_PHÉP"
+      ]
+    }
+  }
+}

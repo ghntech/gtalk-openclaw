@@ -1,0 +1,228 @@
+import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
+import { gtalkPlugin } from "./src/channel.js";
+import { verifySignature, type GtalkWebhookPayload } from "./src/webhook.js";
+import { GtalkClient } from "./src/client.js";
+import type { IncomingMessage } from "http";
+
+async function readJsonBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try { resolve(data ? JSON.parse(data) : {}); }
+      catch { resolve({}); }
+    });
+    req.on("error", reject);
+  });
+}
+
+// Runtime được inject bởi OpenClaw khi plugin load
+let gtalkRuntime: any = null;
+
+export function setGtalkRuntime(runtime: any) {
+  gtalkRuntime = runtime;
+}
+
+export default defineChannelPluginEntry({
+  id: "gtalk-openclaw",
+  name: "GTalk",
+  description: "Channel plugin kết nối OpenClaw với GHN GTalk",
+  plugin: gtalkPlugin,
+  setRuntime: setGtalkRuntime,
+  registerFull(api) {
+
+    // ── Inbound Webhook (GTalk → OpenClaw) ──────────────────────────────────
+    api.registerHttpRoute({
+      path: "/gtalk-openclaw/webhook",
+      auth: "plugin",
+      handler: async (req, res) => {
+        const payload = await readJsonBody(req) as GtalkWebhookPayload;
+        const rawBody = JSON.stringify(payload);
+
+        const signature = req.headers["x-gtalk-event-signature"] as string;
+        // webhookSecret lấy từ plugins.entries.gtalk-openclaw.config.webhookSecret
+        const webhookSecret = api.pluginConfig.webhookSecret as string | undefined;
+
+        // 1. Nếu có webhookSecret → luôn verify, không match thì 401
+        if (webhookSecret) {
+          if (!signature || !verifySignature(payload, rawBody, signature, webhookSecret)) {
+            api.logger.warn("gtalk-openclaw: invalid or missing webhook signature");
+            res.statusCode = 401;
+            res.end("Unauthorized");
+            return true;
+          }
+        }
+
+        // 2. Trả 200 ngay (GTalk timeout nhanh)
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok: true }));
+
+        // 3. Validate payload — so sánh string để tránh lỗi số lớn
+        // globalMsgId, channelId, senderId phải là chuỗi số hợp lệ > "0"
+        const isNonZeroId = (val: string | undefined) =>
+          val && /^\d+$/.test(val) && val !== "0";
+
+        const isValidPayload =
+          payload.contentType === 0 &&
+          isNonZeroId(payload.globalMsgId) &&
+          isNonZeroId(payload.channelId) &&
+          isNonZeroId(payload.senderId) &&
+          payload.content && payload.content.trim().length > 0;
+
+        if (!isValidPayload) {
+          return true;
+        }
+
+        // 4. Dispatch vào OpenClaw
+        try {
+          if (!gtalkRuntime) {
+            api.logger.warn("gtalk-openclaw: runtime not ready");
+            return true;
+          }
+
+          const cfg = api.config;
+          const channel = "gtalk-openclaw";
+          const to = `gtalk-openclaw:${payload.channelId}`;
+
+          // Resolve agent route
+          const route = await gtalkRuntime.channel.routing.resolveAgentRoute({
+            cfg,
+            channel,
+            accountId: null,
+            from: `gtalk-openclaw:${payload.senderId}`,
+            chatType: "direct",
+          });
+
+          if (!route) {
+            api.logger.warn(`gtalk-openclaw: no route for sender ${payload.senderId}`);
+            return true;
+          }
+
+          // Build inbound context
+          const ctxPayload = gtalkRuntime.channel.reply.finalizeInboundContext({
+            Body: payload.content,
+            BodyForAgent: payload.content,
+            RawBody: payload.content,
+            From: `gtalk-openclaw:${payload.senderId}`,
+            To: to,
+            SessionKey: route.sessionKey,
+            AccountId: route.accountId,
+            ChatType: "direct",
+            Provider: "gtalk-openclaw",
+            Surface: "gtalk-openclaw",
+            MessageSid: payload.globalMsgId || payload.clientMsgId || String(Date.now()),
+            Timestamp: parseInt(payload.timestamp) || Date.now(),
+            SenderId: payload.senderId,
+          });
+
+          // Lấy config GTalk từ channels section
+          const accCfg = (cfg as any)?.channels?.["gtalk-openclaw"] ?? {};
+          const gtalkClient = new GtalkClient(
+            accCfg.apiUrl ?? "https://mbff.ghn.vn",
+            accCfg.oaToken ?? ""
+          );
+
+          // Dispatch + deliver reply về GTalk
+          await gtalkRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+            ctx: ctxPayload,
+            cfg,
+            dispatcherOptions: {
+              deliver: async (replyPayload: any) => {
+                const text = replyPayload?.text ?? replyPayload?.Text ?? String(replyPayload ?? "");
+                if (text) {
+                  await gtalkClient.sendText(payload.channelId, text);
+                }
+              },
+              onError: (err: any) => {
+                api.logger.error(`gtalk-openclaw: deliver error: ${err.message}`);
+              },
+            },
+          });
+        } catch (err: any) {
+          api.logger.error(`gtalk-openclaw: inbound dispatch failed: ${err.message}`);
+        }
+
+        return true;
+      },
+    });
+
+    // ── Setup Channel API ────────────────────────────────────────────────────
+    // POST /gtalk-openclaw/setup-channel
+    // Body: { oaId, oaToken?, userId, webhookUrl }
+    //   oaId: OA ID (hoặc truyền luôn "oaId:password" vào đây nếu không có oaToken riêng)
+    //   oaToken: (optional) override — nếu không truyền thì lấy từ channels.gtalk-openclaw.oaToken
+    //   userId: GTalk user ID muốn tạo channel
+    //   webhookUrl: URL webhook của OpenClaw, VD: https://your-host/gtalk-openclaw/webhook
+    api.registerHttpRoute({
+      path: "/gtalk-openclaw/setup-channel",
+      auth: "plugin",
+      handler: async (req, res) => {
+        const body = await readJsonBody(req);
+        const { oaId: oaIdRaw, oaToken: oaTokenParam, userId, webhookUrl } = body as {
+          oaId?: string;
+          oaToken?: string;
+          userId?: string;
+          webhookUrl?: string;
+        };
+
+        if (!oaIdRaw || !userId || !webhookUrl) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "oaId, userId, webhookUrl are required" }));
+          return true;
+        }
+
+        // Resolve oaId và oaToken
+        // Nếu oaId chứa ":" và không có oaToken riêng → coi oaId là oaToken luôn
+        let oaId: string;
+        let resolvedOaToken: string;
+        if (oaIdRaw.includes(":") && !oaTokenParam) {
+          resolvedOaToken = oaIdRaw;
+          oaId = oaIdRaw.split(":")[0];
+        } else {
+          oaId = oaIdRaw;
+          const chanCfg = (api.config as any)?.channels?.["gtalk-openclaw"] ?? {};
+          resolvedOaToken = oaTokenParam ?? chanCfg.oaToken ?? "";
+        }
+
+        // Lấy apiUrl từ config (fallback production)
+        const chanCfg = (api.config as any)?.channels?.["gtalk-openclaw"] ?? {};
+        const apiUrl = chanCfg.apiUrl ?? "https://mbff.ghn.vn";
+        const client = new GtalkClient(apiUrl, resolvedOaToken);
+
+        // webhookSecret từ plugin config (optional)
+        const webhookSecret = api.pluginConfig.webhookSecret as string | undefined;
+
+        try {
+          // Step 1: Tạo direct channel
+          const channelId = await client.createDirectChannel(oaId, userId);
+
+          // Step 2: Đăng ký webhook
+          await client.configChannelWebhook({
+            oaId,
+            channelId,
+            webhookURL: webhookUrl,
+            webhookSecret,
+            retry: {
+              maxRetries: 3,
+              retryDelayMs: 1000,
+              retryOnStatusCodes: [500, 502, 503],
+            },
+          });
+
+          api.logger.info(`gtalk-openclaw: setup channel ${channelId} for user ${userId}`);
+
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ channelId }));
+        } catch (err: any) {
+          api.logger.error(`gtalk-openclaw: setup-channel failed: ${err.message}`);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message }));
+        }
+
+        return true;
+      },
+    });
+  },
+});

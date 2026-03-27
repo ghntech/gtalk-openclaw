@@ -1,0 +1,14 @@
+{
+  "id": "gtalk-openclaw",
+  "kind": "channel",
+  "channels": ["gtalk-openclaw"],
+  "name": "GTalk",
+  "description": "Channel plugin cho GTalk",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "webhookSecret": { "type": "string" }
+    }
+  }
+}

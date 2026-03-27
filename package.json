@@ -1,0 +1,27 @@
+{
+  "name": "@myorg/gtalk-openclaw",
+  "version": "1.0.0",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "gtalk-openclaw",
+      "label": "GTalk",
+      "blurb": "Kết nối OpenClaw với GHN GTalk."
+    }
+  },
+  "dependencies": {
+    "mime-types": "^2.1.35",
+    "sharp": "^0.33.0",
+    "openclaw": "file:/opt/homebrew/lib/node_modules/openclaw"
+  },
+  "devDependencies": {
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^1.0.0"
+  }
+}
