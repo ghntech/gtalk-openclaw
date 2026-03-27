@@ -46,15 +46,8 @@ read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu 
 
 echo ""
 
-# ── Build plugin ─────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
-
-echo "🔨 Build plugin..."
-cd "$PLUGIN_DIR"
-npm install || err "npm install thất bại"
-npm run build || err "Build thất bại"
-ok "Build OK"
 
 # ── Install plugin ───────────────────────────────────────────
 echo " Cài plugin..."
