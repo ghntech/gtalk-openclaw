@@ -1,0 +1,60 @@
+name: CI — Build & Commit dist
+
+on:
+  push:
+    branches-ignore:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Patch package.json — replace local openclaw path with stub
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            // openclaw is installed locally on dev machine via file: path.
+            // On CI we remove it — skipLibCheck:true in tsconfig handles missing types.
+            delete pkg.dependencies.openclaw;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+            console.log('Patched: removed local openclaw dependency');
+          "
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit dist/ to branch
+        # Only commit on push events (not on PR from forks)
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          # Only commit if there are changes in dist/
+          if git diff --staged --quiet; then
+            echo "No changes in dist/, skipping commit"
+          else
+            git commit -m "chore: build dist [skip ci]"
+            git push
+            echo "dist/ committed and pushed"
+          fi

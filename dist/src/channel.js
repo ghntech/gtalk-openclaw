@@ -1,61 +1,48 @@
-import { createChatChannelPlugin, createChannelPluginBase, } from "openclaw/plugin-sdk/core";
+import { createChatChannelPlugin, } from "openclaw/plugin-sdk/core";
 import { GtalkClient } from "./client.js";
-function getSection(cfg) {
-    return cfg.channels?.["gtalk-openclaw"] ?? {};
-}
 function resolveAccount(cfg, accountId) {
-    const section = getSection(cfg);
-    if (!section.oaToken)
+    const section = cfg.channels?.["gtalk-openclaw"];
+    if (!section?.oaToken)
         throw new Error("gtalk-openclaw: oaToken is required");
-    if (!section.apiUrl)
+    if (!section?.apiUrl)
         throw new Error("gtalk-openclaw: apiUrl is required");
     return {
+        accountId: accountId ?? null,
         oaToken: section.oaToken,
         apiUrl: section.apiUrl,
         allowFrom: section.allowFrom ?? [],
     };
 }
-// Lấy capabilities schema từ Telegram để biết fields cần thiết
-const CAPABILITIES = {
-    chatTypes: ["direct"],
-    media: false,
-    reactions: false,
-    threads: false,
-    nativeCommands: false,
-    blockStreaming: false,
-    inlineButtons: false,
-    ephemeralReplies: false,
-    voiceMessages: false,
-    locationMessages: false,
-    pollMessages: false,
-};
 export const gtalkPlugin = createChatChannelPlugin({
-    base: createChannelPluginBase({
+    base: {
         id: "gtalk-openclaw",
         meta: {
+            id: "gtalk-openclaw",
             label: "GTalk",
+            selectionLabel: "GTalk",
+            docsPath: "/channels/gtalk",
             blurb: "GHN GTalk channel",
         },
-        capabilities: CAPABILITIES,
-        setup: {
-            applyAccountConfig: (params) => params.cfg,
+        capabilities: {
+            chatTypes: ["direct"],
+            media: true,
         },
         config: {
-            listAccountIds: (cfg) => {
-                const section = getSection(cfg);
-                return section.oaToken ? ["default"] : [];
-            },
+            listAccountIds: (_cfg) => ["default"],
             resolveAccount,
-            inspectAccount: (cfg) => {
-                const section = getSection(cfg);
+            inspectAccount(cfg, _accountId) {
+                const section = cfg.channels?.["gtalk-openclaw"];
                 return {
-                    enabled: Boolean(section.oaToken),
-                    configured: Boolean(section.oaToken && section.apiUrl),
-                    tokenStatus: section.oaToken ? "available" : "missing",
+                    enabled: Boolean(section?.oaToken),
+                    configured: Boolean(section?.oaToken && section?.apiUrl),
+                    tokenStatus: section?.oaToken ? "available" : "missing",
                 };
             },
         },
-    }),
+        setup: {
+            applyAccountConfig: ({ cfg }) => cfg,
+        },
+    },
     security: {
         dm: {
             channelKey: "gtalk-openclaw",
@@ -66,13 +53,32 @@ export const gtalkPlugin = createChatChannelPlugin({
     },
     threading: { topLevelReplyToMode: "reply" },
     outbound: {
+        base: {
+            deliveryMode: "direct",
+        },
         attachedResults: {
             channel: "gtalk-openclaw",
-            sendText: async (ctx) => {
-                const acc = resolveAccount(ctx.cfg, ctx.accountId);
+            // Gửi text message
+            sendText: async (params) => {
+                const cfg = params.cfg;
+                const acc = resolveAccount(cfg, params.accountId);
                 const client = new GtalkClient(acc.apiUrl, acc.oaToken);
-                const result = await client.sendText(ctx.to, ctx.text);
+                const result = await client.sendText(params.to, params.text);
                 return { messageId: result.globalMsgId };
+            },
+            // Gửi file/ảnh/video — upload 3 bước rồi send
+            sendMedia: async (params) => {
+                const cfg = params.cfg;
+                const acc = resolveAccount(cfg, params.accountId);
+                const client = new GtalkClient(acc.apiUrl, acc.oaToken);
+                const filePath = params.filePath ?? params.mediaUrl ?? "";
+                const caption = params.caption;
+                await client.uploadAndSend({
+                    channelId: params.to,
+                    filePath,
+                    caption,
+                });
+                return { messageId: "" };
             },
         },
     },

@@ -1,6 +1,5 @@
 import {
   createChatChannelPlugin,
-  createChannelPluginBase,
 } from "openclaw/plugin-sdk/core";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { GtalkClient } from "./client.js";
@@ -28,11 +27,23 @@ function resolveAccount(
 }
 
 export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
-  base: createChannelPluginBase({
+  base: {
     id: "gtalk-openclaw",
-    setup: {
+    meta: {
+      id: "gtalk-openclaw",
+      label: "GTalk",
+      selectionLabel: "GTalk",
+      docsPath: "/channels/gtalk",
+      blurb: "GHN GTalk channel",
+    },
+    capabilities: {
+      chatTypes: ["direct"],
+      media: true,
+    },
+    config: {
+      listAccountIds: (_cfg: OpenClawConfig) => ["default"],
       resolveAccount,
-      inspectAccount(cfg, _accountId) {
+      inspectAccount(cfg: OpenClawConfig, _accountId?: string | null) {
         const section = (cfg.channels as Record<string, any>)?.["gtalk-openclaw"];
         return {
           enabled: Boolean(section?.oaToken),
@@ -41,13 +52,16 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
         };
       },
     },
-  }),
+    setup: {
+      applyAccountConfig: ({ cfg }: { cfg: OpenClawConfig; accountId: string; input: Record<string, unknown> }) => cfg,
+    },
+  },
 
   security: {
     dm: {
       channelKey: "gtalk-openclaw",
-      resolvePolicy: (_account) => "allowlist",
-      resolveAllowFrom: (account) => account.allowFrom,
+      resolvePolicy: (_account: ResolvedAccount) => "allowlist",
+      resolveAllowFrom: (account: ResolvedAccount) => account.allowFrom,
       defaultPolicy: "allowlist",
     },
   },
@@ -55,25 +69,32 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
   threading: { topLevelReplyToMode: "reply" },
 
   outbound: {
+    base: {
+      deliveryMode: "direct",
+    },
     attachedResults: {
+      channel: "gtalk-openclaw",
       // Gửi text message
       sendText: async (params) => {
-        const acc = params.account;
+        const cfg = params.cfg;
+        const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
         const result = await client.sendText(params.to, params.text);
         return { messageId: result.globalMsgId };
       },
-    },
-    base: {
       // Gửi file/ảnh/video — upload 3 bước rồi send
       sendMedia: async (params) => {
-        const acc = params.account;
+        const cfg = params.cfg;
+        const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
+        const filePath = (params as any).filePath ?? (params as any).mediaUrl ?? "";
+        const caption = (params as any).caption;
         await client.uploadAndSend({
           channelId: params.to,
-          filePath: params.filePath,
-          caption: params.caption,
+          filePath,
+          caption,
         });
+        return { messageId: "" };
       },
     },
   },

@@ -38,7 +38,7 @@ export default defineChannelPluginEntry({
                 const rawBody = JSON.stringify(payload);
                 const signature = req.headers["x-gtalk-event-signature"];
                 // webhookSecret lấy từ plugins.entries.gtalk-openclaw.config.webhookSecret
-                const webhookSecret = api.pluginConfig.webhookSecret;
+                const webhookSecret = api.pluginConfig?.webhookSecret;
                 // 1. Nếu có webhookSecret → luôn verify, không match thì 401
                 if (webhookSecret) {
                     if (!signature || !verifySignature(payload, rawBody, signature, webhookSecret)) {
@@ -162,7 +162,7 @@ export default defineChannelPluginEntry({
                 const apiUrl = chanCfg.apiUrl ?? "https://mbff.ghn.vn";
                 const client = new GtalkClient(apiUrl, resolvedOaToken);
                 // webhookSecret từ plugin config (optional)
-                const webhookSecret = api.pluginConfig.webhookSecret;
+                const webhookSecret = api.pluginConfig?.webhookSecret;
                 try {
                     // Step 1: Tạo direct channel
                     const channelId = await client.createDirectChannel(oaId, userId);
