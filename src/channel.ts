@@ -75,7 +75,7 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
     attachedResults: {
       channel: "gtalk-openclaw",
       // Gửi text message
-      sendText: async (params) => {
+      sendText: async (params: any) => {
         const cfg = params.cfg;
         const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
@@ -83,7 +83,7 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
         return { messageId: result.globalMsgId };
       },
       // Gửi file/ảnh/video — upload 3 bước rồi send
-      sendMedia: async (params) => {
+      sendMedia: async (params: any) => {
         const cfg = params.cfg;
         const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
