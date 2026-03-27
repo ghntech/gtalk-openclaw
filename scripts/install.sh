@@ -42,16 +42,44 @@ API_URL="${API_URL:-https://mbff.ghn.vn}"
 
 read -p "Webhook Secret (để trống nếu không dùng): " WEBHOOK_SECRET
 
-read -p "GTalk User ID được phép dùng (có thể điền sau): " ALLOW_FROM
+read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy (có thể điền sau): " ALLOW_FROM
 
 echo ""
 
-# ── Install plugin ───────────────────────────────────────────
+# ── Build plugin ─────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "📦 Cài plugin..."
-# Xóa thư mục extension cũ nếu tồn tại
+echo "🔨 Build plugin..."
+cd "$PLUGIN_DIR"
+npm install || err "npm install thất bại"
+npm run build || err "Build thất bại"
+ok "Build OK"
+
+# ── Install plugin ───────────────────────────────────────────
+echo " Cài plugin..."
+# Xóa channels.gtalk-openclaw khỏi config trước để tránh validation lỗi khi uninstall
+GTALK_CONFIG="$HOME/.openclaw/openclaw.json" node << 'RMCHAN'
+const fs = require('fs');
+const cfgPath = process.env.GTALK_CONFIG;
+if (!fs.existsSync(cfgPath)) process.exit(0);
+let cfg;
+try {
+  cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+} catch (e) {
+  console.error('Warning: openclaw.json parse error, skipping cleanup:', e.message);
+  process.exit(0);
+}
+if (cfg.channels) delete cfg.channels['gtalk-openclaw'];
+if (cfg.plugins && cfg.plugins.entries) delete cfg.plugins.entries['gtalk-openclaw'];
+if (cfg.plugins && Array.isArray(cfg.plugins.allow)) {
+  cfg.plugins.allow = cfg.plugins.allow.filter(id => id !== 'gtalk-openclaw');
+  if (cfg.plugins.allow.length === 0) delete cfg.plugins.allow;
+}
+fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+console.log('Cleaned old config');
+RMCHAN
+# Uninstall plugin cũ và xóa thư mục
 openclaw plugins uninstall gtalk-openclaw 2>/dev/null || true
 rm -rf "$HOME/.openclaw/extensions/gtalk-openclaw" 2>/dev/null || true
 openclaw plugins install "$PLUGIN_DIR" || err "Cài plugin thất bại"
@@ -63,7 +91,7 @@ echo "📡 Bật Tailscale Funnel..."
 sleep 2
 
 # Lấy webhook URL
-WEBHOOK_HOST=$("$TAILSCALE" funnel status 2>/dev/null | grep "https://" | awk '{print $1}' | tr -d '/')
+WEBHOOK_HOST=$("$TAILSCALE" funnel status 2>/dev/null | grep "https://" | awk '{print $1}' | head -1 | tr -d '/')
 [ -z "$WEBHOOK_HOST" ] && err "Không lấy được Tailscale URL"
 WEBHOOK_URL="${WEBHOOK_HOST}/gtalk-openclaw/webhook"
 ok "Tailscale Funnel: $WEBHOOK_URL"
@@ -88,7 +116,7 @@ cat > "$PLIST" << PLIST_CONTENT
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>StandardOutPath</key>
     <string>/tmp/gtalk-openclaw-funnel.log</string>
     <key>StandardErrorPath</key>
@@ -96,34 +124,59 @@ cat > "$PLIST" << PLIST_CONTENT
 </dict>
 </plist>
 PLIST_CONTENT
+# Unload trước nếu đã load (idempotent), rồi load lại
+launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST" 2>/dev/null || true
 ok "LaunchAgent installed (funnel tự bật khi khởi động)"
 
-# ── Cập nhật openclaw.json ────────────────────────────────────
-echo "⚙️  Cập nhật OpenClaw config..."
+# ── Kiểm tra openclaw.json hợp lệ ────────────────────────────
 CONFIG="$HOME/.openclaw/openclaw.json"
 [ -f "$CONFIG" ] || err "Không tìm thấy $CONFIG"
+node -e "JSON.parse(require('fs').readFileSync('$CONFIG','utf8'))" || err "openclaw.json bị lỗi JSON, vui lòng kiểm tra lại"
 
-node - << NODE
+# ── Cập nhật openclaw.json ────────────────────────────────────
+echo "⚙️  Cập nhật OpenClaw config..."
+
+# Truyền qua env vars để tránh lỗi ký tự đặc biệt trong JSON
+GTALK_OA_TOKEN="$OA_TOKEN" \
+GTALK_API_URL="$API_URL" \
+GTALK_WEBHOOK_SECRET="$WEBHOOK_SECRET" \
+GTALK_ALLOW_FROM="$ALLOW_FROM" \
+GTALK_CONFIG="$CONFIG" \
+node << 'NODE'
 const fs = require('fs');
-const cfg = JSON.parse(fs.readFileSync('$CONFIG', 'utf8'));
+const cfg = JSON.parse(fs.readFileSync(process.env.GTALK_CONFIG, 'utf8'));
 
+// plugins
 cfg.plugins = cfg.plugins || {};
 cfg.plugins.entries = cfg.plugins.entries || {};
-cfg.plugins.entries['gtalk-openclaw'] = {
-  enabled: true,
-  config: ${WEBHOOK_SECRET:+{ "webhookSecret": "$WEBHOOK_SECRET" }}${WEBHOOK_SECRET:-{}}
-};
 
+// plugins.allow — giữ entries cũ, thêm gtalk-openclaw
+const allow = Array.isArray(cfg.plugins.allow) ? cfg.plugins.allow : [];
+if (!allow.includes('gtalk-openclaw')) allow.push('gtalk-openclaw');
+cfg.plugins.allow = allow;
+
+// plugin config
+const pluginConfig = {};
+if (process.env.GTALK_WEBHOOK_SECRET) {
+  pluginConfig.webhookSecret = process.env.GTALK_WEBHOOK_SECRET;
+}
+cfg.plugins.entries['gtalk-openclaw'] = { enabled: true, config: pluginConfig };
+
+// channel config
 cfg.channels = cfg.channels || {};
+// Hỗ trợ nhiều user ID cách nhau bằng dấu phẩy
+const allowFrom = process.env.GTALK_ALLOW_FROM
+  ? process.env.GTALK_ALLOW_FROM.split(',').map(s => s.trim()).filter(Boolean)
+  : [];
 cfg.channels['gtalk-openclaw'] = {
-  oaToken: '$OA_TOKEN',
-  apiUrl: '$API_URL',
-  allowFrom: ${ALLOW_FROM:+["$ALLOW_FROM"]}${ALLOW_FROM:-[]}
+  oaToken: process.env.GTALK_OA_TOKEN,
+  apiUrl: process.env.GTALK_API_URL,
+  allowFrom: allowFrom
 };
 
-fs.writeFileSync('$CONFIG', JSON.stringify(cfg, null, 2));
-console.log('Config updated');
+fs.writeFileSync(process.env.GTALK_CONFIG, JSON.stringify(cfg, null, 2));
+console.log('Config updated. plugins.allow:', cfg.plugins.allow);
 NODE
 ok "OpenClaw config updated"
 
@@ -141,6 +194,7 @@ else
 fi
 
 # ── Done ──────────────────────────────────────────────────────
+OA_ID="$(echo "$OA_TOKEN" | cut -d: -f1)"
 echo ""
 echo "════════════════════════════════════════"
 ok "Setup hoàn tất!"
@@ -152,8 +206,8 @@ echo ""
 echo "  curl -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{"
-echo "      \"oaId\": \"$(echo $OA_TOKEN | cut -d: -f1)\","
-echo "      \"oaToken\": \"$OA_TOKEN\","
+echo "      \"oaId\": \"$OA_ID\","
+echo "      \"oaToken\": \"<oaToken>\","
 echo "      \"userId\": \"GTALK_USER_ID\","
 echo "      \"webhookUrl\": \"$WEBHOOK_URL\""
 echo "    }'"

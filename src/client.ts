@@ -165,7 +165,7 @@ export class GtalkClient {
     const res = await fetch(presignedUrl, {
       method: "PUT",
       headers: { "Content-Type": mimeType },
-      body: data,
+      body: data as unknown as BodyInit,
     });
     if (!res.ok) {
       throw new Error(`S3 upload failed: ${res.status} ${res.statusText}`);
