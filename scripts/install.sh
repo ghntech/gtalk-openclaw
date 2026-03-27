@@ -51,7 +51,7 @@ PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
 
 # ── Install dependencies ─────────────────────────────────────
 echo "📦 Cài dependencies..."
-(cd "$PLUGIN_DIR" && npm install --omit dev) || err "npm install thất bại"
+(cd "$PLUGIN_DIR" && npm install --omit dev && npm link openclaw) || err "npm install thất bại"
 ok "Dependencies installed"
 
 # ── Install plugin ───────────────────────────────────────────
