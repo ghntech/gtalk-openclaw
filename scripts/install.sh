@@ -206,8 +206,8 @@ echo "Webhook URL: $WEBHOOK_URL"
 if [ -n "$ALLOW_FROM" ]; then
   echo ""
   echo "⚙️  Đang setup channel cho users..."
-  IFS=',' read -ra USER_IDS <<< "$ALLOW_FROM"
-  for USER_ID in "${USER_IDS[@]}"; do
+  # Split by comma
+  echo "$ALLOW_FROM" | tr ',' '\n' | while read -r USER_ID; do
     USER_ID="$(echo "$USER_ID" | tr -d ' ')"
     [ -z "$USER_ID" ] && continue
     echo "   → userId: $USER_ID"
@@ -215,6 +215,15 @@ if [ -n "$ALLOW_FROM" ]; then
       -H 'Content-Type: application/json' \
       -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}")
     echo "     $RESPONSE"
+    
+    # Gửi lời chào cho user
+    CHANNEL_ID=$(echo "$RESPONSE" | grep -o '"channelId":"[^"]*"' | cut -d'"' -f4)
+    if [ -n "$CHANNEL_ID" ]; then
+      curl -s -X POST "$API_URL/api/gtalk/send-message" \
+        -H 'Content-Type: application/json' \
+        -d "{\"channelId\": \"$CHANNEL_ID\", \"clientMsgId\": \"$(date +%s)\", \"content\": {\"text\": \"👋 Xin chào! Mình là AI Assistant, sẵn sàng hỗ trợ bạn. Hãy nhắn gì đó để bắt đầu nhé!\", \"parseMode\": \"PLAIN_TEXT\"}, \"oaToken\": \"$OA_TOKEN\"}" > /dev/null
+      echo "     → Đã gửi lời chào!"
+    fi
   done
   ok "Setup channel xong!"
 else
