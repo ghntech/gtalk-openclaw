@@ -45,7 +45,7 @@ if ([string]::IsNullOrWhiteSpace($API_URL)) {
 
 $WEBHOOK_SECRET = Read-Host "Webhook Secret (để trống nếu không dùng)"
 
-$ALLOW_FROM = Read-Host "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy (có thể điền sau)"
+$ALLOW_FROM = Read-Host "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy"
 
 Write-Host ""
 
@@ -196,6 +196,27 @@ Write-Ok "Setup hoàn tất!"
 Write-Host ""
 Write-Host "Webhook URL: $WEBHOOK_URL" -ForegroundColor Green
 
+# ── Chờ plugin route sẵn sàng ────────────────────────────────
+Write-Host "⏳ Chờ plugin route sẵn sàng..." -ForegroundColor Cyan
+$MaxWait = 30
+$Waited = 0
+while ($Waited -lt $MaxWait) {
+    try {
+        $probe = Invoke-WebRequest -Uri "http://127.0.0.1:18789/gtalk-openclaw/setup-channel" `
+            -Method Post -ContentType "application/json" -Body "{}" -ErrorAction Stop
+        break
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        # 400 = route exists but missing params → plugin is loaded
+        if ($code -and $code -ne 404) { break }
+    }
+    Start-Sleep -Seconds 2
+    $Waited += 2
+}
+if ($Waited -ge $MaxWait) {
+    Write-Warn "Plugin route chưa sẵn sàng sau ${MaxWait}s — thử setup channel thủ công sau"
+}
+
 # ── Tự động setup channel cho từng userId ────────────────────
 if (-not [string]::IsNullOrWhiteSpace($ALLOW_FROM)) {
     Write-Host ""
@@ -212,21 +233,6 @@ if (-not [string]::IsNullOrWhiteSpace($ALLOW_FROM)) {
         try {
             $response = Invoke-RestMethod -Uri "http://127.0.0.1:18789/gtalk-openclaw/setup-channel" -Method Post -ContentType "application/json" -Body $body
             Write-Host "     $($response | ConvertTo-Json -Compress)"
-            
-            # Gửi lời chào cho user
-            if ($response.channelId) {
-                $greetBody = @{
-                    channelId = $response.channelId
-                    clientMsgId = [DateTimeOffset]::Now.ToUnixTimeSeconds().ToString()
-                    content = @{
-                        text = "👋 Xin chào! Mình là AI Assistant, sẵn sàng hỗ trợ bạn. Hãy nhắn gì đó để bắt đầu nhé!"
-                        parseMode = "PLAIN_TEXT"
-                    }
-                    oaToken = $OA_TOKEN
-                } | ConvertTo-Json -Depth 3
-                Invoke-RestMethod -Uri "$API_URL/api/gtalk/send-message" -Method Post -ContentType "application/json" -Body $greetBody | Out-Null
-                Write-Host "     → Đã gửi lời chào!" -ForegroundColor Green
-            }
         } catch {
             Write-Host "     Error: $_" -ForegroundColor Red
         }
