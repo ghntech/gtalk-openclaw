@@ -11,14 +11,19 @@ Plugin kết nối OpenClaw với GHN GTalk qua REST API + Webhook.
 git clone https://github.com/ghntech/gtalk-openclaw.git
 cd gtalk-openclaw
 
-# Chạy script setup (tự động làm hết)
-bash scripts/install.sh
+# Chạy script setup theo OS
 ```
+
+| OS | Lệnh |
+|----|-------|
+| **macOS** | `bash scripts/install.sh` |
+| **Linux** | `bash scripts/install-linux.sh` |
+| **Windows** | `powershell -ExecutionPolicy Bypass -File scripts\install.ps1` |
 
 Script sẽ tự động:
 - Cài plugin vào OpenClaw
 - Bật Tailscale Funnel expose **chỉ đúng path** `/gtalk-openclaw/webhook` (không ảnh hưởng các channel khác)
-- Cài LaunchAgent tự bật funnel khi khởi động Mac
+- Cài auto-start (macOS: LaunchAgent, Linux: systemd, Windows: Task Scheduler)
 - Cập nhật `~/.openclaw/openclaw.json`
 - Setup channel cho các user đã nhập
 - Restart gateway
@@ -28,7 +33,10 @@ Script sẽ tự động:
 ## Yêu cầu
 
 - OpenClaw đã cài và đang chạy (`openclaw status`)
-- macOS với Tailscale app (`/Applications/Tailscale.app`)
+- Tailscale đã cài và đăng nhập
+  - macOS: `/Applications/Tailscale.app`
+  - Linux: `tailscale` CLI
+  - Windows: Tailscale app
 - Node.js 18+
 
 ---
