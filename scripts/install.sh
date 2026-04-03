@@ -202,6 +202,23 @@ ok "Setup hoàn tất!"
 echo ""
 echo "Webhook URL: $WEBHOOK_URL"
 
+# ── Chờ plugin route sẵn sàng ────────────────────────────────
+echo "⏳ Chờ plugin route sẵn sàng..."
+MAX_WAIT=30
+WAITED=0
+while [ "$WAITED" -lt "$MAX_WAIT" ]; do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel -H 'Content-Type: application/json' -d '{}')
+  # 400 = route exists but missing params → plugin is loaded
+  if [ "$HTTP_CODE" != "404" ] && [ "$HTTP_CODE" != "000" ]; then
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+  warn "Plugin route chưa sẵn sàng sau ${MAX_WAIT}s — thử setup channel thủ công sau"
+fi
+
 # ── Tự động setup channel cho từng userId ────────────────────
 if [ -n "$ALLOW_FROM" ]; then
   echo ""

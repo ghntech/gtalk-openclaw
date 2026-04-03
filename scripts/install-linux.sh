@@ -41,7 +41,7 @@ API_URL="${API_URL:-https://mbff.ghn.vn}"
 
 read -p "Webhook Secret (để trống nếu không dùng): " WEBHOOK_SECRET
 
-read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy (có thể điền sau): " ALLOW_FROM
+read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy: " ALLOW_FROM
 
 echo ""
 
@@ -188,6 +188,23 @@ ok "Setup hoàn tất!"
 echo ""
 echo "Webhook URL: $WEBHOOK_URL"
 
+# ── Chờ plugin route sẵn sàng ────────────────────────────────
+echo "⏳ Chờ plugin route sẵn sàng..."
+MAX_WAIT=30
+WAITED=0
+while [ "$WAITED" -lt "$MAX_WAIT" ]; do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel -H 'Content-Type: application/json' -d '{}')
+  # 400 = route exists but missing params → plugin is loaded
+  if [ "$HTTP_CODE" != "404" ] && [ "$HTTP_CODE" != "000" ]; then
+    break
+  fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+  warn "Plugin route chưa sẵn sàng sau ${MAX_WAIT}s — thử setup channel thủ công sau"
+fi
+
 # ── Tự động setup channel cho từng userId ────────────────────
 if [ -n "$ALLOW_FROM" ]; then
   echo ""
@@ -200,16 +217,7 @@ if [ -n "$ALLOW_FROM" ]; then
     RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
       -H 'Content-Type: application/json' \
       -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}")
-    echo "     $RESPONSE"
-    
-    # Gửi lời chào cho user
-    CHANNEL_ID=$(echo "$RESPONSE" | grep -o '"channelId":"[^"]*"' | cut -d'"' -f4)
-    if [ -n "$CHANNEL_ID" ]; then
-      curl -s -X POST "$API_URL/api/gtalk/send-message" \
-        -H 'Content-Type: application/json' \
-        -d "{\"channelId\": \"$CHANNEL_ID\", \"clientMsgId\": \"$(date +%s)\", \"content\": {\"text\": \"👋 Xin chào! Mình là AI Assistant, sẵn sàng hỗ trợ bạn. Hãy nhắn gì đó để bắt đầu nhé!\", \"parseMode\": \"PLAIN_TEXT\"}, \"oaToken\": \"$OA_TOKEN\"}" > /dev/null
-      echo "     → Đã gửi lời chào!"
-    fi
+    echo "RESPONSE: $RESPONSE"
   done
   ok "Setup channel xong!"
 else
