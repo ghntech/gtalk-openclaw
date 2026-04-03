@@ -6,9 +6,6 @@
   "description": "Channel plugin cho GTalk",
   "configSchema": {
     "type": "object",
-    "additionalProperties": true,
-    "properties": {
-      "webhookSecret": { "type": "string" }
-    }
+    "additionalProperties": true
   }
 }

@@ -40,13 +40,20 @@ export default defineChannelPluginEntry({
         const rawBody = JSON.stringify(payload);
 
         const signature = req.headers["x-gtalk-event-signature"] as string;
-        // webhookSecret lấy từ plugins.entries.gtalk-openclaw.config.webhookSecret
-        const webhookSecret = api.pluginConfig?.webhookSecret as string | undefined;
+        // webhookSecret lấy từ channels.gtalk-openclaw.webhookSecret
+        const chanCfgForSecret = (api.config as any)?.channels?.["gtalk-openclaw"] ?? {};
+        const webhookSecret = chanCfgForSecret.webhookSecret as string | undefined;
 
-        // 1. Nếu có webhookSecret → luôn verify, không match thì 401
+        // 1. Nếu có webhookSecret → verify signature, log rõ nếu sai
         if (webhookSecret) {
-          if (!signature || !verifySignature(payload, rawBody, signature, webhookSecret)) {
-            api.logger.warn("gtalk-openclaw: invalid or missing webhook signature");
+          if (!signature) {
+            api.logger.warn("gtalk-openclaw: missing webhook signature header (x-gtalk-event-signature)");
+            res.statusCode = 401;
+            res.end("Unauthorized");
+            return true;
+          }
+          if (!verifySignature(payload, rawBody, signature, webhookSecret)) {
+            api.logger.warn(`gtalk-openclaw: invalid webhook signature. Got: ${signature}`);
             res.statusCode = 401;
             res.end("Unauthorized");
             return true;
@@ -63,8 +70,9 @@ export default defineChannelPluginEntry({
         const isNonZeroId = (val: string | undefined) =>
           val && /^\d+$/.test(val) && val !== "0";
 
+        // contentType: 0=text, 1=image, 2=video, 3=file, v.v.
+        // Chỉ bỏ qua nếu thiếu ID hoặc không có content
         const isValidPayload =
-          payload.contentType === 0 &&
           isNonZeroId(payload.globalMsgId) &&
           isNonZeroId(payload.channelId) &&
           isNonZeroId(payload.senderId) &&
@@ -72,6 +80,37 @@ export default defineChannelPluginEntry({
 
         if (!isValidPayload) {
           return true;
+        }
+
+        // Xử lý theo contentType
+        // contentType: 0=text, 1=image, 2=video, 3=file
+        if (payload.contentType !== 0) {
+          // Cố gắng parse content để lấy fileId và mô tả cho agent
+          let mediaDesc = "[User gửi một tập tin]";
+          try {
+            const mediaCfg = (api.config as any)?.channels?.["gtalk-openclaw"] ?? {};
+            const mediaClient = new GtalkClient(
+              mediaCfg.apiUrl ?? "https://mbff.ghn.vn",
+              mediaCfg.oaToken ?? ""
+            );
+            const parsed = JSON.parse(payload.content);
+            const fileId = parsed?.fileId ?? parsed?.id ?? parsed?.Id;
+            if (fileId) {
+              const detail = await mediaClient.getFileDetail(fileId);
+              const typeLabel =
+                payload.contentType === 1 ? "🖼️ Ảnh" :
+                payload.contentType === 2 ? "🎥 Video" : "📎 File";
+              mediaDesc = `[${typeLabel}: ${detail.FileName} (${(parseInt(detail.FileSize)/1024).toFixed(1)} KB)]`;
+            }
+          } catch {
+            const typeLabel =
+              payload.contentType === 1 ? "🖼️ Ảnh" :
+              payload.contentType === 2 ? "🎥 Video" : "📎 File";
+            mediaDesc = `[${typeLabel}]`;
+          }
+          // Thay content bằng mô tả để agent biết
+          payload.content = mediaDesc;
+          payload.contentType = 0; // Treat as text để dispatch bình thường
         }
 
         // 4. Dispatch vào OpenClaw
@@ -129,9 +168,58 @@ export default defineChannelPluginEntry({
             cfg,
             dispatcherOptions: {
               deliver: async (replyPayload: any) => {
-                const text = replyPayload?.text ?? replyPayload?.Text ?? String(replyPayload ?? "");
-                if (text) {
-                  await gtalkClient.sendText(payload.channelId, text);
+                // 1. Template message — nếu agent gửi object có template field
+                if (replyPayload?.template || replyPayload?.templateId) {
+                  const tmpl = replyPayload.template ?? replyPayload;
+                  await gtalkClient.sendTemplate(
+                    payload.channelId,
+                    tmpl.templateId,
+                    tmpl.shortMessage ?? tmpl.title ?? "",
+                    {
+                      icon_url: tmpl.iconUrl ?? tmpl.icon_url,
+                      title: tmpl.title ?? "",
+                      content: tmpl.content ?? "",
+                      actions: tmpl.actions,
+                    },
+                  );
+                  return;
+                }
+
+                // 2. Extract text từ nhiều dạng block OpenClaw có thể gửi
+                let text: string | undefined;
+                if (typeof replyPayload === "string") {
+                  text = replyPayload;
+                } else if (replyPayload?.text) {
+                  text = replyPayload.text;
+                } else if (replyPayload?.Text) {
+                  text = replyPayload.Text;
+                } else if (replyPayload?.body) {
+                  text = replyPayload.body;
+                } else if (replyPayload?.content) {
+                  text = typeof replyPayload.content === "string"
+                    ? replyPayload.content
+                    : JSON.stringify(replyPayload.content);
+                } else if (replyPayload && typeof replyPayload === "object") {
+                  const s = JSON.stringify(replyPayload);
+                  if (s !== "{}" && s !== "null") text = s;
+                }
+
+                if (text && text.trim()) {
+                  // Xác định parseMode: lấy từ replyPayload nếu có, fallback tự detect từ content
+                  const rawMode = replyPayload?.parseMode ?? replyPayload?.parse_mode;
+                  let parseMode: "PLAIN_TEXT" | "MARKDOWN" | "HTML";
+                  if (rawMode === "PLAIN_TEXT" || rawMode === "MARKDOWN" || rawMode === "HTML") {
+                    parseMode = rawMode;
+                  } else if (/<[a-z][\s\S]*>/i.test(text)) {
+                    parseMode = "HTML";
+                  } else if (/[*_`#\[\]~>]/.test(text)) {
+                    parseMode = "MARKDOWN";
+                  } else {
+                    parseMode = "PLAIN_TEXT";
+                  }
+                  await gtalkClient.sendText(payload.channelId, text.trim(), parseMode);
+                } else {
+                  api.logger.debug(`gtalk-openclaw: skipping empty/unsupported reply block type=${replyPayload?.type ?? "unknown"}`);
                 }
               },
               onError: (err: any) => {
@@ -191,7 +279,7 @@ export default defineChannelPluginEntry({
         const client = new GtalkClient(apiUrl, resolvedOaToken);
 
         // webhookSecret từ plugin config (optional)
-        const webhookSecret = api.pluginConfig?.webhookSecret as string | undefined;
+        const webhookSecret = (api.config as any)?.channels?.["gtalk-openclaw"]?.webhookSecret as string | undefined;
 
         try {
           // Step 1: Tạo direct channel

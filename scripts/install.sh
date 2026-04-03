@@ -83,14 +83,17 @@ rm -rf "$HOME/.openclaw/extensions/gtalk-openclaw" 2>/dev/null || true
 openclaw plugins install --link "$PLUGIN_DIR" || err "Cài plugin thất bại"
 ok "Plugin installed"
 
-# ── Bật Tailscale Funnel ─────────────────────────────────────
+# ── Bật Tailscale Funnel (chỉ expose đúng webhook path) ──────
 echo "📡 Bật Tailscale Funnel..."
-"$TAILSCALE" funnel --bg 18789 || err "Bật Tailscale Funnel thất bại. Kiểm tra Tailscale đã login chưa."
+# Chỉ expose /gtalk-openclaw/webhook, không expose toàn bộ port
+# để tránh ảnh hưởng các channel khác (Telegram, v.v.)
+"$TAILSCALE" funnel --bg --set-path /gtalk-openclaw/webhook http://127.0.0.1:18789/gtalk-openclaw/webhook || err "Bật Tailscale Funnel thất bại. Kiểm tra Tailscale đã login chưa."
 sleep 2
 
-# Lấy webhook URL
-WEBHOOK_HOST=$("$TAILSCALE" funnel status 2>/dev/null | grep "https://" | awk '{print $1}' | head -1 | tr -d '/')
-[ -z "$WEBHOOK_HOST" ] && err "Không lấy được Tailscale URL"
+# Lấy webhook URL — lấy hostname từ dòng https://, rồi ghép path
+FUNNEL_STATUS=$("$TAILSCALE" funnel status 2>/dev/null)
+WEBHOOK_HOST=$(echo "$FUNNEL_STATUS" | grep -o 'https://[^[:space:]]*' | head -1 | sed 's|/$||')
+[ -z "$WEBHOOK_HOST" ] && err "Không lấy được Tailscale URL. Kiểm tra: $TAILSCALE funnel status"
 WEBHOOK_URL="${WEBHOOK_HOST}/gtalk-openclaw/webhook"
 ok "Tailscale Funnel: $WEBHOOK_URL"
 
@@ -109,7 +112,9 @@ cat > "$PLIST" << PLIST_CONTENT
         <string>$TAILSCALE</string>
         <string>funnel</string>
         <string>--bg</string>
-        <string>18789</string>
+        <string>--set-path</string>
+        <string>/gtalk-openclaw/webhook</string>
+        <string>http://127.0.0.1:18789/gtalk-openclaw/webhook</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -154,24 +159,21 @@ const allow = Array.isArray(cfg.plugins.allow) ? cfg.plugins.allow : [];
 if (!allow.includes('gtalk-openclaw')) allow.push('gtalk-openclaw');
 cfg.plugins.allow = allow;
 
-// plugin config
-const pluginConfig = {};
-if (process.env.GTALK_WEBHOOK_SECRET) {
-  pluginConfig.webhookSecret = process.env.GTALK_WEBHOOK_SECRET;
-}
-cfg.plugins.entries['gtalk-openclaw'] = { enabled: true, config: pluginConfig };
+// plugin entry (không cần config — webhookSecret lưu trong channel config)
+cfg.plugins.entries['gtalk-openclaw'] = { enabled: true };
 
-// channel config
+// channel config — allowFrom là string (comma-separated)
 cfg.channels = cfg.channels || {};
-// Hỗ trợ nhiều user ID cách nhau bằng dấu phẩy
-const allowFrom = process.env.GTALK_ALLOW_FROM
-  ? process.env.GTALK_ALLOW_FROM.split(',').map(s => s.trim()).filter(Boolean)
-  : [];
-cfg.channels['gtalk-openclaw'] = {
+const channelConfig = {
   oaToken: process.env.GTALK_OA_TOKEN,
   apiUrl: process.env.GTALK_API_URL,
-  allowFrom: allowFrom
+  allowFrom: process.env.GTALK_ALLOW_FROM || ''
 };
+// webhookSecret lưu trong channel config
+if (process.env.GTALK_WEBHOOK_SECRET) {
+  channelConfig.webhookSecret = process.env.GTALK_WEBHOOK_SECRET;
+}
+cfg.channels['gtalk-openclaw'] = channelConfig;
 
 fs.writeFileSync(process.env.GTALK_CONFIG, JSON.stringify(cfg, null, 2));
 console.log('Config updated. plugins.allow:', cfg.plugins.allow);
@@ -199,15 +201,28 @@ echo "════════════════════════�
 ok "Setup hoàn tất!"
 echo ""
 echo "Webhook URL: $WEBHOOK_URL"
-echo ""
-echo "Tiếp theo — setup channel cho user:"
-echo ""
-echo "  curl -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{"
-echo "      \"oaId\": \"$OA_ID\","
-echo "      \"oaToken\": \"<oaToken>\","
-echo "      \"userId\": \"GTALK_USER_ID\","
-echo "      \"webhookUrl\": \"$WEBHOOK_URL\""
-echo "    }'"
+
+# ── Tự động setup channel cho từng userId ────────────────────
+if [ -n "$ALLOW_FROM" ]; then
+  echo ""
+  echo "⚙️  Đang setup channel cho users..."
+  IFS=',' read -ra USER_IDS <<< "$ALLOW_FROM"
+  for USER_ID in "${USER_IDS[@]}"; do
+    USER_ID="$(echo "$USER_ID" | tr -d ' ')"
+    [ -z "$USER_ID" ] && continue
+    echo "   → userId: $USER_ID"
+    RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
+      -H 'Content-Type: application/json' \
+      -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}")
+    echo "     $RESPONSE"
+  done
+  ok "Setup channel xong!"
+else
+  echo ""
+  warn "Chưa có userId — chạy thủ công sau:"
+  echo ""
+  echo "  curl -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \\"
+  echo "    -H 'Content-Type: application/json' \\"
+  echo "    -d '{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"GTALK_USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}'"
+fi
 echo "════════════════════════════════════════"

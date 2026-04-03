@@ -79,11 +79,18 @@ export class GtalkClient {
       body: JSON.stringify({ ...body, oaToken: this.oaToken }),
     });
 
-    const json = (await res.json()) as GtalkResponse<T>;
+    let json: GtalkResponse<T>;
+    let rawText = "";
+    try {
+      rawText = await res.text();
+      json = JSON.parse(rawText) as GtalkResponse<T>;
+    } catch {
+      throw new Error(`GTalk API error: invalid JSON response (status=${res.status}): ${rawText.slice(0, 200)}`);
+    }
 
     if (json.errorCode !== "success") {
       const msg = json.errorMessage ?? json.error?.errorMessage ?? "unknown error";
-      throw new Error(`GTalk API error [${json.errorCode}]: ${msg}`);
+      throw new Error(`GTalk API error [${json.errorCode}]: ${msg} | raw: ${rawText.slice(0, 300)}`);
     }
 
     return json.data as T;

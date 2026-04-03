@@ -6,11 +6,16 @@ function resolveAccount(cfg, accountId) {
         throw new Error("gtalk-openclaw: oaToken is required");
     if (!section?.apiUrl)
         throw new Error("gtalk-openclaw: apiUrl is required");
+    // allowFrom có thể là string (comma-separated) hoặc array
+    const rawAllowFrom = section.allowFrom ?? "";
+    const allowFrom = Array.isArray(rawAllowFrom)
+        ? rawAllowFrom
+        : rawAllowFrom.split(",").map((s) => s.trim()).filter(Boolean);
     return {
         accountId: accountId ?? null,
         oaToken: section.oaToken,
         apiUrl: section.apiUrl,
-        allowFrom: section.allowFrom ?? [],
+        allowFrom,
     };
 }
 export const gtalkPlugin = createChatChannelPlugin({
