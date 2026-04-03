@@ -193,7 +193,7 @@ echo "⏳ Chờ plugin route sẵn sàng..."
 MAX_WAIT=30
 WAITED=0
 while [ "$WAITED" -lt "$MAX_WAIT" ]; do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel -H 'Content-Type: application/json' -d '{}')
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)
   # 400 = route exists but missing params → plugin is loaded
   if [ "$HTTP_CODE" != "404" ] && [ "$HTTP_CODE" != "000" ]; then
     break
@@ -214,9 +214,9 @@ if [ -n "$ALLOW_FROM" ]; then
     USER_ID="$(echo "$USER_ID" | tr -d ' ')"
     [ -z "$USER_ID" ] && continue
     echo "   → userId: $USER_ID"
-    RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
+    RESPONSE=$(curl -s --max-time 30 -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
       -H 'Content-Type: application/json' \
-      -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}")
+      -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}" 2>/dev/null || echo '{"error":"curl timeout"}')
     echo "RESPONSE: $RESPONSE"
   done
   ok "Setup channel xong!"
