@@ -212,6 +212,21 @@ if (-not [string]::IsNullOrWhiteSpace($ALLOW_FROM)) {
         try {
             $response = Invoke-RestMethod -Uri "http://127.0.0.1:18789/gtalk-openclaw/setup-channel" -Method Post -ContentType "application/json" -Body $body
             Write-Host "     $($response | ConvertTo-Json -Compress)"
+            
+            # Gửi lời chào cho user
+            if ($response.channelId) {
+                $greetBody = @{
+                    channelId = $response.channelId
+                    clientMsgId = [DateTimeOffset]::Now.ToUnixTimeSeconds().ToString()
+                    content = @{
+                        text = "👋 Xin chào! Mình là AI Assistant, sẵn sàng hỗ trợ bạn. Hãy nhắn gì đó để bắt đầu nhé!"
+                        parseMode = "PLAIN_TEXT"
+                    }
+                    oaToken = $OA_TOKEN
+                } | ConvertTo-Json -Depth 3
+                Invoke-RestMethod -Uri "$API_URL/api/gtalk/send-message" -Method Post -ContentType "application/json" -Body $greetBody | Out-Null
+                Write-Host "     → Đã gửi lời chào!" -ForegroundColor Green
+            }
         } catch {
             Write-Host "     Error: $_" -ForegroundColor Red
         }
