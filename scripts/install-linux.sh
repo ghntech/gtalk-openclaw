@@ -45,7 +45,7 @@ read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu 
 
 echo ""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Install dependencies ─────────────────────────────────────

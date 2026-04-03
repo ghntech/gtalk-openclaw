@@ -49,7 +49,7 @@ $ALLOW_FROM = Read-Host "GTalk User ID được phép dùng, nhiều ID cách nh
 
 Write-Host ""
 
-$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SCRIPT_DIR = $PSScriptRoot
 $PLUGIN_DIR = Split-Path -Parent $SCRIPT_DIR
 
 # ── Install dependencies ─────────────────────────────────────

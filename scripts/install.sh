@@ -42,11 +42,11 @@ API_URL="${API_URL:-https://mbff.ghn.vn}"
 
 read -p "Webhook Secret (để trống nếu không dùng): " WEBHOOK_SECRET
 
-read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy (có thể điền sau): " ALLOW_FROM
+read -p "GTalk User ID được phép dùng, nhiều ID cách nhau bằng dấu phẩy: " ALLOW_FROM
 
 echo ""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Install dependencies ─────────────────────────────────────
@@ -214,16 +214,7 @@ if [ -n "$ALLOW_FROM" ]; then
     RESPONSE=$(curl -s -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
       -H 'Content-Type: application/json' \
       -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}")
-    echo "     $RESPONSE"
-    
-    # Gửi lời chào cho user
-    CHANNEL_ID=$(echo "$RESPONSE" | grep -o '"channelId":"[^"]*"' | cut -d'"' -f4)
-    if [ -n "$CHANNEL_ID" ]; then
-      curl -s -X POST "$API_URL/api/gtalk/send-message" \
-        -H 'Content-Type: application/json' \
-        -d "{\"channelId\": \"$CHANNEL_ID\", \"clientMsgId\": \"$(date +%s)\", \"content\": {\"text\": \"👋 Xin chào! Mình là AI Assistant, sẵn sàng hỗ trợ bạn. Hãy nhắn gì đó để bắt đầu nhé!\", \"parseMode\": \"PLAIN_TEXT\"}, \"oaToken\": \"$OA_TOKEN\"}" > /dev/null
-      echo "     → Đã gửi lời chào!"
-    fi
+    echo "RESPONSE: $RESPONSE"
   done
   ok "Setup channel xong!"
 else

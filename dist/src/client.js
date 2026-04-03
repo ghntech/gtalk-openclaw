@@ -251,7 +251,7 @@ export class GtalkClient {
                     enabled: params.enabled ?? true,
                     webhookURL: params.webhookURL,
                     ...(params.webhookSecret ? { webhookSecret: params.webhookSecret } : {}),
-                    webhookResponseTimeoutInSecond: params.webhookResponseTimeoutInSecond ?? 30,
+                    webhookResponseTimeoutInSecond: params.webhookResponseTimeoutInSecond ?? 60,
                     method: params.method ?? "POST",
                     headers: params.headers ?? { "Content-Type": "application/json" },
                     ...(params.retry ? { retry: params.retry } : {}),
