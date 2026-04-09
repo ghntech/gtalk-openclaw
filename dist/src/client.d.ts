@@ -38,6 +38,32 @@ export interface FileDetailResult {
 export interface CreateDirectChannelResult {
     channelId: string;
 }
+export interface GtalkLogger {
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+    error: (msg: string) => void;
+    debug: (msg: string) => void;
+}
+export declare enum ReceiptStatus {
+    RS_UNKNOWN = 0,
+    RECEIVED = 1,
+    SEEN = 2,
+    TYPING = 3,
+    REACTION_SEEN = 4,
+    REACTION_UNSEEN = 5,
+    THINKING = 6,
+    PROCESSING = 7
+}
+export interface ReceiptEntry {
+    globalMsgId: string;
+    status: ReceiptStatus;
+    receiptedTs?: number;
+}
+export interface SendReceiptParams {
+    oaId: string;
+    channelId: string;
+    receipts: ReceiptEntry[];
+}
 export interface ConfigChannelProcessingParams {
     oaId: string;
     channelId: string;
@@ -56,7 +82,8 @@ export interface ConfigChannelProcessingParams {
 export declare class GtalkClient {
     private readonly baseUrl;
     private readonly oaToken;
-    constructor(baseUrl: string, oaToken: string);
+    private readonly logger?;
+    constructor(baseUrl: string, oaToken: string, logger?: GtalkLogger);
     private post;
     sendText(channelId: string, text: string, parseMode?: "PLAIN_TEXT" | "MARKDOWN" | "HTML"): Promise<SendMessageResult>;
     sendTemplate(channelId: string, templateId: string, shortMessage: string, templateData: {
@@ -117,6 +144,29 @@ export declare class GtalkClient {
      * @returns channelId để dùng trong send-message
      */
     createDirectChannel(oaId: string, userId: string): Promise<string>;
+    /**
+     * Gửi receipt cho một message trong channel.
+     * Dùng để báo đã nhận (SEEN) hoặc đang gõ (TYPING).
+     *
+     * @param params.oaId        - OA ID
+     * @param params.channelId   - Channel ID
+     * @param params.receipts    - Danh sách receipt entries (globalMsgId, status, receiptedTs?)
+     */
+    sendReceipt(params: SendReceiptParams): Promise<void>;
+    /**
+     * Chỉnh sửa hoặc xóa một message đã gửi.
+     *
+     * @param params.channelId   - Channel chứa message
+     * @param params.globalMsgId - Global message ID cần sửa/xóa
+     * @param params.action      - 1=edit, 2=delete
+     * @param params.content     - Nội dung mới (bắt buộc khi action=1)
+     */
+    modifyMessage(params: {
+        channelId: string;
+        globalMsgId: string;
+        action: 1 | 2;
+        content?: Record<string, unknown>;
+    }): Promise<void>;
     /**
      * Cấu hình webhook cho một channel.
      * Gọi một lần khi setup, hoặc khi cần cập nhật webhook URL/secret.
