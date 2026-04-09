@@ -1,7 +1,7 @@
 import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
 import { gtalkPlugin } from "./src/channel.js";
 import { verifySignature } from "./src/webhook.js";
-import { GtalkClient } from "./src/client.js";
+import { GtalkClient, ReceiptStatus } from "./src/client.js";
 async function readJsonBody(req) {
     return new Promise((resolve, reject) => {
         let data = "";
@@ -69,8 +69,10 @@ export default defineChannelPluginEntry({
                     isNonZeroId(payload.senderId) &&
                     payload.content && payload.content.trim().length > 0;
                 if (!isValidPayload) {
+                    api.logger.debug(`gtalk-openclaw: skipping invalid payload globalMsgId=${payload.globalMsgId} channelId=${payload.channelId} senderId=${payload.senderId}`);
                     return true;
                 }
+                api.logger.debug(`gtalk-openclaw: ← inbound payload=${JSON.stringify(payload).slice(0, 500)}`);
                 // Xử lý theo contentType
                 // contentType: 0=text, 1=image, 2=video, 3=file
                 if (payload.contentType !== 0) {
@@ -78,7 +80,7 @@ export default defineChannelPluginEntry({
                     let mediaDesc = "[User gửi một tập tin]";
                     try {
                         const mediaCfg = api.config?.channels?.["gtalk-openclaw"] ?? {};
-                        const mediaClient = new GtalkClient(mediaCfg.apiUrl ?? "https://mbff.ghn.vn", mediaCfg.oaToken ?? "");
+                        const mediaClient = new GtalkClient(mediaCfg.apiUrl ?? "https://mbff.ghn.vn", mediaCfg.oaToken ?? "", api.logger);
                         const parsed = JSON.parse(payload.content);
                         const fileId = parsed?.fileId ?? parsed?.id ?? parsed?.Id;
                         if (fileId) {
@@ -136,75 +138,166 @@ export default defineChannelPluginEntry({
                     });
                     // Lấy config GTalk từ channels section
                     const accCfg = cfg?.channels?.["gtalk-openclaw"] ?? {};
-                    const gtalkClient = new GtalkClient(accCfg.apiUrl ?? "https://mbff.ghn.vn", accCfg.oaToken ?? "");
+                    const gtalkClient = new GtalkClient(accCfg.apiUrl ?? "https://mbff.ghn.vn", accCfg.oaToken ?? "", api.logger);
+                    // Gửi SEEN + TYPING receipt trong một lần gọi
+                    gtalkClient.sendReceipt({
+                        oaId: payload.oaId,
+                        channelId: payload.channelId,
+                        receipts: [
+                            { globalMsgId: payload.globalMsgId, status: ReceiptStatus.SEEN },
+                            { globalMsgId: payload.globalMsgId, status: ReceiptStatus.TYPING },
+                        ],
+                    }).catch((err) => {
+                        api.logger.warn(`gtalk-openclaw: receipts failed: ${err.message}`);
+                    });
+                    // TYPING heartbeat — re-send TYPING every 5s, max 10 times while agent is processing
+                    // GTalk typing indicator expires after ~3s, so we keep refreshing it
+                    let typingCount = 0;
+                    const typingInterval = setInterval(() => {
+                        if (++typingCount > 10) {
+                            clearInterval(typingInterval);
+                            return;
+                        }
+                        gtalkClient.sendReceipt({
+                            oaId: payload.oaId,
+                            channelId: payload.channelId,
+                            receipts: [{ globalMsgId: payload.globalMsgId, status: ReceiptStatus.TYPING }],
+                        }).catch(() => { }); // silent — best effort
+                    }, 5000);
                     // Dispatch + deliver reply về GTalk
-                    await gtalkRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-                        ctx: ctxPayload,
-                        cfg,
-                        dispatcherOptions: {
-                            deliver: async (replyPayload) => {
-                                // 1. Template message — nếu agent gửi object có template field
-                                if (replyPayload?.template || replyPayload?.templateId) {
-                                    const tmpl = replyPayload.template ?? replyPayload;
-                                    await gtalkClient.sendTemplate(payload.channelId, tmpl.templateId, tmpl.shortMessage ?? tmpl.title ?? "", {
-                                        icon_url: tmpl.iconUrl ?? tmpl.icon_url,
-                                        title: tmpl.title ?? "",
-                                        content: tmpl.content ?? "",
-                                        actions: tmpl.actions,
-                                    });
-                                    return;
-                                }
-                                // 2. Extract text từ nhiều dạng block OpenClaw có thể gửi
-                                let text;
-                                if (typeof replyPayload === "string") {
-                                    text = replyPayload;
-                                }
-                                else if (replyPayload?.text) {
-                                    text = replyPayload.text;
-                                }
-                                else if (replyPayload?.Text) {
-                                    text = replyPayload.Text;
-                                }
-                                else if (replyPayload?.body) {
-                                    text = replyPayload.body;
-                                }
-                                else if (replyPayload?.content) {
-                                    text = typeof replyPayload.content === "string"
-                                        ? replyPayload.content
-                                        : JSON.stringify(replyPayload.content);
-                                }
-                                else if (replyPayload && typeof replyPayload === "object") {
-                                    const s = JSON.stringify(replyPayload);
-                                    if (s !== "{}" && s !== "null")
-                                        text = s;
-                                }
-                                if (text && text.trim()) {
-                                    // Xác định parseMode: lấy từ replyPayload nếu có, fallback tự detect từ content
-                                    const rawMode = replyPayload?.parseMode ?? replyPayload?.parse_mode;
-                                    let parseMode;
-                                    if (rawMode === "PLAIN_TEXT" || rawMode === "MARKDOWN" || rawMode === "HTML") {
-                                        parseMode = rawMode;
+                    // placeholderMsgId: nếu đã gửi placeholder "…" cho block rỗng, lưu globalMsgId ở đây
+                    // để block tiếp theo có thể edit thay vì gửi mới.
+                    let placeholderMsgId = null;
+                    try {
+                        await gtalkRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+                            ctx: ctxPayload,
+                            cfg,
+                            dispatcherOptions: {
+                                deliver: async (replyPayload) => {
+                                    // 1. Template message — nếu agent gửi object có template field
+                                    if (replyPayload?.template || replyPayload?.templateId) {
+                                        const tmpl = replyPayload.template ?? replyPayload;
+                                        // Nếu đang có placeholder, xóa trước khi gửi template
+                                        if (placeholderMsgId) {
+                                            const pid = placeholderMsgId;
+                                            placeholderMsgId = null;
+                                            gtalkClient.modifyMessage({
+                                                channelId: payload.channelId,
+                                                globalMsgId: pid,
+                                                action: 2,
+                                            }).catch((err) => {
+                                                api.logger.warn(`gtalk-openclaw: delete placeholder failed: ${err.message}`);
+                                            });
+                                        }
+                                        const tmplResult = await gtalkClient.sendTemplate(payload.channelId, tmpl.templateId, tmpl.shortMessage ?? tmpl.title ?? "", {
+                                            icon_url: tmpl.iconUrl ?? tmpl.icon_url,
+                                            title: tmpl.title ?? "",
+                                            content: tmpl.content ?? "",
+                                            actions: tmpl.actions,
+                                        });
+                                        api.logger.debug(`gtalk-openclaw: sent template channelId=${payload.channelId} templateId=${tmpl.templateId} globalMsgId=${tmplResult.globalMsgId}`);
+                                        return;
                                     }
-                                    else if (/<[a-z][\s\S]*>/i.test(text)) {
-                                        parseMode = "HTML";
+                                    // 2. Extract text từ nhiều dạng block OpenClaw có thể gửi
+                                    let text;
+                                    if (typeof replyPayload === "string") {
+                                        text = replyPayload;
                                     }
-                                    else if (/[*_`#\[\]~>]/.test(text)) {
-                                        parseMode = "MARKDOWN";
+                                    else if (replyPayload?.text) {
+                                        text = replyPayload.text;
+                                    }
+                                    else if (replyPayload?.Text) {
+                                        text = replyPayload.Text;
+                                    }
+                                    else if (replyPayload?.body) {
+                                        text = replyPayload.body;
+                                    }
+                                    else if (replyPayload?.content) {
+                                        text = typeof replyPayload.content === "string"
+                                            ? replyPayload.content
+                                            : JSON.stringify(replyPayload.content);
+                                    }
+                                    else if (replyPayload && typeof replyPayload === "object") {
+                                        const s = JSON.stringify(replyPayload);
+                                        if (s !== "{}" && s !== "null")
+                                            text = s;
+                                    }
+                                    if (text && text.trim()) {
+                                        // Xác định parseMode: lấy từ replyPayload nếu có, fallback tự detect từ content
+                                        const rawMode = replyPayload?.parseMode ?? replyPayload?.parse_mode;
+                                        let parseMode;
+                                        if (rawMode === "PLAIN_TEXT" || rawMode === "MARKDOWN" || rawMode === "HTML") {
+                                            parseMode = rawMode;
+                                        }
+                                        else if (/<[a-z][\s\S]*>/i.test(text)) {
+                                            parseMode = "HTML";
+                                        }
+                                        else if (/[*_`#\[\]~>]/.test(text)) {
+                                            parseMode = "MARKDOWN";
+                                        }
+                                        else {
+                                            parseMode = "PLAIN_TEXT";
+                                        }
+                                        if (placeholderMsgId) {
+                                            // Có placeholder đang chờ → edit thay vì gửi mới
+                                            const pid = placeholderMsgId;
+                                            placeholderMsgId = null;
+                                            try {
+                                                await gtalkClient.modifyMessage({
+                                                    channelId: payload.channelId,
+                                                    globalMsgId: pid,
+                                                    action: 1,
+                                                    content: { text: text.trim(), parseMode },
+                                                });
+                                                api.logger.debug(`gtalk-openclaw: edited placeholder globalMsgId=${pid} channelId=${payload.channelId} preview="${text.trim().slice(0, 80)}"`);
+                                            }
+                                            catch (editErr) {
+                                                // Edit thất bại → fallback gửi mới
+                                                api.logger.debug(`gtalk-openclaw: edit placeholder failed, sending new: ${editErr.message}`);
+                                                await gtalkClient.sendText(payload.channelId, text.trim(), parseMode);
+                                            }
+                                        }
+                                        else {
+                                            const sendResult = await gtalkClient.sendText(payload.channelId, text.trim(), parseMode);
+                                            api.logger.debug(`gtalk-openclaw: sent text channelId=${payload.channelId} globalMsgId=${sendResult.globalMsgId} preview="${text.trim().slice(0, 80)}"`);
+                                        }
                                     }
                                     else {
-                                        parseMode = "PLAIN_TEXT";
+                                        // Block rỗng — gửi placeholder "…" nếu chưa có
+                                        api.logger.debug(`gtalk-openclaw: empty reply block type=${replyPayload?.type ?? "unknown"}, sending placeholder`);
+                                        if (!placeholderMsgId) {
+                                            try {
+                                                const result = await gtalkClient.sendText(payload.channelId, "…");
+                                                placeholderMsgId = result.globalMsgId;
+                                            }
+                                            catch (phErr) {
+                                                api.logger.debug(`gtalk-openclaw: placeholder send failed: ${phErr.message}`);
+                                            }
+                                        }
                                     }
-                                    await gtalkClient.sendText(payload.channelId, text.trim(), parseMode);
-                                }
-                                else {
-                                    api.logger.debug(`gtalk-openclaw: skipping empty/unsupported reply block type=${replyPayload?.type ?? "unknown"}`);
-                                }
+                                },
+                                onError: (err) => {
+                                    api.logger.error(`gtalk-openclaw: deliver error: ${err.message}`);
+                                },
                             },
-                            onError: (err) => {
-                                api.logger.error(`gtalk-openclaw: deliver error: ${err.message}`);
-                            },
-                        },
-                    });
+                        });
+                        // Nếu sau khi dispatch xong vẫn còn placeholder chưa được edit → xóa đi
+                        if (placeholderMsgId) {
+                            const pid = placeholderMsgId;
+                            placeholderMsgId = null;
+                            gtalkClient.modifyMessage({
+                                channelId: payload.channelId,
+                                globalMsgId: pid,
+                                action: 2,
+                            }).catch((err) => {
+                                api.logger.debug(`gtalk-openclaw: cleanup placeholder failed: ${err.message}`);
+                            });
+                        }
+                    }
+                    finally {
+                        // Stop TYPING heartbeat once dispatch is complete (success or error)
+                        clearInterval(typingInterval);
+                    }
                 }
                 catch (err) {
                     api.logger.error(`gtalk-openclaw: inbound dispatch failed: ${err.message}`);
@@ -246,7 +339,7 @@ export default defineChannelPluginEntry({
                 // Lấy apiUrl từ config (fallback production)
                 const chanCfg = api.config?.channels?.["gtalk-openclaw"] ?? {};
                 const apiUrl = chanCfg.apiUrl ?? "https://mbff.ghn.vn";
-                const client = new GtalkClient(apiUrl, resolvedOaToken);
+                const client = new GtalkClient(apiUrl, resolvedOaToken, api.logger);
                 // webhookSecret từ plugin config (optional)
                 const webhookSecret = api.config?.channels?.["gtalk-openclaw"]?.webhookSecret;
                 try {
@@ -264,7 +357,7 @@ export default defineChannelPluginEntry({
                             retryOnStatusCodes: [500, 502, 503],
                         },
                     });
-                    api.logger.info(`gtalk-openclaw: setup channel ${channelId} for user ${userId}`);
+                    api.logger.debug(`gtalk-openclaw: setup channel ${channelId} for user ${userId}`);
                     res.statusCode = 200;
                     res.setHeader("Content-Type", "application/json");
                     res.end(JSON.stringify({ channelId }));

@@ -47,6 +47,36 @@ export interface CreateDirectChannelResult {
   channelId: string;
 }
 
+export interface GtalkLogger {
+  info: (msg: string) => void;
+  warn: (msg: string) => void;
+  error: (msg: string) => void;
+  debug: (msg: string) => void;
+}
+
+export enum ReceiptStatus {
+  RS_UNKNOWN = 0,
+  RECEIVED = 1,
+  SEEN = 2,
+  TYPING = 3,
+  REACTION_SEEN = 4,
+  REACTION_UNSEEN = 5,
+  THINKING = 6,
+  PROCESSING = 7,
+}
+
+export interface ReceiptEntry {
+  globalMsgId: string;
+  status: ReceiptStatus;
+  receiptedTs?: number;
+}
+
+export interface SendReceiptParams {
+  oaId: string;
+  channelId: string;
+  receipts: ReceiptEntry[];
+}
+
 export interface ConfigChannelProcessingParams {
   oaId: string;
   channelId: string;
@@ -66,13 +96,20 @@ export interface ConfigChannelProcessingParams {
 export class GtalkClient {
   private readonly baseUrl: string;
   private readonly oaToken: string;
+  private readonly logger?: GtalkLogger;
 
-  constructor(baseUrl: string, oaToken: string) {
+  constructor(baseUrl: string, oaToken: string, logger?: GtalkLogger) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.oaToken = oaToken;
+    this.logger = logger;
   }
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    // Log outbound request — mask oaToken to avoid leaking credentials
+    const { oaToken: _masked, ...logBody } = { oaToken: "", ...body };
+    const bodyStr = JSON.stringify(logBody).slice(0, 500);
+    this.logger?.debug(`gtalk-client: → POST ${path} body=${bodyStr}`);
+
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -85,14 +122,17 @@ export class GtalkClient {
       rawText = await res.text();
       json = JSON.parse(rawText) as GtalkResponse<T>;
     } catch {
+      this.logger?.warn(`gtalk-client: ← ${res.status} ${path} invalid JSON response=${rawText.slice(0, 300)}`);
       throw new Error(`GTalk API error: invalid JSON response (status=${res.status}): ${rawText.slice(0, 200)}`);
     }
 
     if (json.errorCode !== "success") {
       const msg = json.errorMessage ?? json.error?.errorMessage ?? "unknown error";
+      this.logger?.warn(`gtalk-client: ← ${res.status} ${path} errorCode=${json.errorCode} msg=${msg} response=${rawText.slice(0, 300)}`);
       throw new Error(`GTalk API error [${json.errorCode}]: ${msg} | raw: ${rawText.slice(0, 300)}`);
     }
 
+    this.logger?.debug(`gtalk-client: ← ${res.status} ${path} errorCode=success response=${rawText.slice(0, 300)}`);
     return json.data as T;
   }
 
@@ -388,6 +428,55 @@ export class GtalkClient {
       { oaId, userId },
     );
     return result.channelId;
+  }
+
+  // ─── Message Receipt ──────────────────────────────────────────────────────
+
+  /**
+   * Gửi receipt cho một message trong channel.
+   * Dùng để báo đã nhận (SEEN) hoặc đang gõ (TYPING).
+   *
+   * @param params.oaId        - OA ID
+   * @param params.channelId   - Channel ID
+   * @param params.receipts    - Danh sách receipt entries (globalMsgId, status, receiptedTs?)
+   */
+  async sendReceipt(params: SendReceiptParams): Promise<void> {
+    const now = Date.now();
+    await this.post<Record<string, never>>("/api/gtalk/send-message-receipt", {
+      oaId: params.oaId,
+      receiptMessage: {
+        channelId: params.channelId,
+        receipts: params.receipts.map((r) => ({
+          status: r.status,
+          receiptedTs: r.receiptedTs ?? now,
+          globalMsgId: r.globalMsgId,
+        })),
+      },
+    });
+  }
+
+  // ─── Modify Message ───────────────────────────────────────────────────────
+
+  /**
+   * Chỉnh sửa hoặc xóa một message đã gửi.
+   *
+   * @param params.channelId   - Channel chứa message
+   * @param params.globalMsgId - Global message ID cần sửa/xóa
+   * @param params.action      - 1=edit, 2=delete
+   * @param params.content     - Nội dung mới (bắt buộc khi action=1)
+   */
+  async modifyMessage(params: {
+    channelId: string;
+    globalMsgId: string;
+    action: 1 | 2;
+    content?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.post<Record<string, never>>("/api/gtalk/modify-message", {
+      channelId: params.channelId,
+      globalMsgId: params.globalMsgId,
+      action: params.action,
+      ...(params.content ? { content: params.content } : {}),
+    });
   }
 
   // ─── Configure Channel Webhook ────────────────────────────────────────────
