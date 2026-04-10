@@ -237,7 +237,42 @@ export default defineChannelPluginEntry({
                     return;
                   }
 
-                  // 2. Extract text từ nhiều dạng block OpenClaw có thể gửi
+                  // 2. Media message — agent gửi ảnh/video/file từ tool (mediaUrl / mediaUrls)
+                  const mediaUrls: string[] =
+                    replyPayload?.mediaUrls ??
+                    (replyPayload?.mediaUrl ? [replyPayload.mediaUrl] : []);
+
+                  if (mediaUrls.length > 0) {
+                    // Xóa placeholder nếu đang có
+                    if (placeholderMsgId) {
+                      const pid = placeholderMsgId;
+                      placeholderMsgId = null;
+                      gtalkClient.modifyMessage({
+                        channelId: payload.channelId,
+                        globalMsgId: pid,
+                        action: 2,
+                      }).catch((err: any) => {
+                        api.logger.warn(`gtalk-openclaw: delete placeholder failed: ${err.message}`);
+                      });
+                    }
+
+                    for (const filePath of mediaUrls) {
+                      if (!filePath) continue;
+                      try {
+                        await gtalkClient.uploadAndSend({
+                          channelId: payload.channelId,
+                          filePath,
+                          caption: replyPayload?.caption,
+                        });
+                        api.logger.debug(`gtalk-openclaw: sent media channelId=${payload.channelId} filePath=${filePath}`);
+                      } catch (mediaErr: any) {
+                        api.logger.error(`gtalk-openclaw: media upload failed filePath=${filePath}: ${mediaErr.message}`);
+                      }
+                    }
+                    return;
+                  }
+
+                  // 3. Extract text từ nhiều dạng block OpenClaw có thể gửi
                   let text: string | undefined;
                   if (typeof replyPayload === "string") {
                     text = replyPayload;
