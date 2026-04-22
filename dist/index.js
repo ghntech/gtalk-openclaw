@@ -74,26 +74,55 @@ export default defineChannelPluginEntry({
                 }
                 api.logger.debug(`gtalk-openclaw: ← inbound payload=${JSON.stringify(payload).slice(0, 500)}`);
                 // Xử lý theo contentType
-                // contentType: 0=text, 1=image, 2=video, 3=file
-                if (payload.contentType !== 0) {
-                    // Cố gắng parse content để lấy fileId và mô tả cho agent
-                    let mediaDesc = "[User gửi một tập tin]";
+                // contentType: 0=text, 3=attachment (image/video/file)
+                if (payload.contentType === 3) {
+                    // Parse content JSON để lấy loại attachment và fileId
+                    // Format: {"caption":"...","items":[{"image":{"fileId":"...","width":960,"height":1280}}],"parseMode":1}
+                    let mediaDesc = "[User gửi một tập tin đính kèm]";
                     try {
                         const mediaCfg = api.config?.channels?.["gtalk-openclaw"] ?? {};
                         const mediaClient = new GtalkClient(mediaCfg.apiUrl ?? "https://mbff.ghn.vn", mediaCfg.oaToken ?? "", api.logger);
                         const parsed = JSON.parse(payload.content);
-                        const fileId = parsed?.fileId ?? parsed?.id ?? parsed?.Id;
+                        const item = parsed?.items?.[0];
+                        const attachImage = item?.image;
+                        const attachVideo = item?.video;
+                        const attachFile = item?.file;
+                        const fileId = attachImage?.fileId ?? attachVideo?.fileId ?? attachFile?.fileId;
                         if (fileId) {
+                            // Lấy metadata file (tên, kích thước)
                             const detail = await mediaClient.getFileDetail(fileId);
-                            const typeLabel = payload.contentType === 1 ? "🖼️ Ảnh" :
-                                payload.contentType === 2 ? "🎥 Video" : "📎 File";
-                            mediaDesc = `[${typeLabel}: ${detail.FileName} (${(parseInt(detail.FileSize) / 1024).toFixed(1)} KB)]`;
+                            const sizeKb = (parseInt(detail.FileSize) / 1024).toFixed(1);
+                            const typeLabel = attachImage ? "🖼️ Ảnh" : attachVideo ? "🎥 Video" : "📎 File";
+                            mediaDesc = `[${typeLabel}: ${detail.FileName} (${sizeKb} KB)]`;
+                            // Gọi get-file để lấy presigned download URL,
+                            // download về temp file rồi truyền local path cho agent
+                            // (tránh OpenClaw proxy fetch qua network bị timeout)
+                            try {
+                                const fileInfo = await mediaClient.getFile(fileId);
+                                const fileResp = await fetch(fileInfo.PresignedURL);
+                                if (fileResp.ok) {
+                                    const ext = detail.FileName.includes(".")
+                                        ? detail.FileName.split(".").pop()
+                                        : attachImage ? "jpg" : attachVideo ? "mp4" : "bin";
+                                    const tmpPath = `/tmp/gtalk-${fileId}.${ext}`;
+                                    const { writeFile } = await import("fs/promises");
+                                    const buf = Buffer.from(await fileResp.arrayBuffer());
+                                    await writeFile(tmpPath, buf);
+                                    mediaDesc = `[${typeLabel}: ${detail.FileName} (${sizeKb} KB)]\nURL: ${tmpPath}`;
+                                    api.logger.debug(`gtalk-openclaw: downloaded attachment to ${tmpPath} fileId=${fileId} type=${typeLabel}`);
+                                }
+                                else {
+                                    api.logger.warn(`gtalk-openclaw: download attachment failed status=${fileResp.status} fileId=${fileId}`);
+                                }
+                            }
+                            catch (getFileErr) {
+                                api.logger.warn(`gtalk-openclaw: get-file/download failed for fileId=${fileId}: ${getFileErr.message}`);
+                                // Fallback: chỉ dùng mô tả không có URL
+                            }
                         }
                     }
                     catch {
-                        const typeLabel = payload.contentType === 1 ? "🖼️ Ảnh" :
-                            payload.contentType === 2 ? "🎥 Video" : "📎 File";
-                        mediaDesc = `[${typeLabel}]`;
+                        mediaDesc = "[User gửi một tập tin đính kèm]";
                     }
                     // Thay content bằng mô tả để agent biết
                     payload.content = mediaDesc;
