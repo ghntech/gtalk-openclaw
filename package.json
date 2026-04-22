@@ -12,6 +12,7 @@
       "./dist/index.js"
     ],
     "setupEntry": "./dist/setup-entry.js",
+    "hooks": [],
     "channel": {
       "id": "gtalk-openclaw",
       "label": "GTalk",

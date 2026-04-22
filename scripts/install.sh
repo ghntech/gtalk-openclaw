@@ -51,7 +51,7 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Install dependencies ─────────────────────────────────────
 echo "📦 Cài dependencies..."
-(cd "$PLUGIN_DIR" && npm install --omit dev && npm link openclaw) || err "npm install thất bại"
+(cd "$PLUGIN_DIR" && npm install --omit dev) || err "npm install thất bại"
 ok "Dependencies installed"
 
 # ── Install plugin ───────────────────────────────────────────
@@ -175,6 +175,43 @@ if (process.env.GTALK_WEBHOOK_SECRET) {
 }
 cfg.channels['gtalk-openclaw'] = channelConfig;
 
+// ── Fix: gateway.trustedProxies (warning: gateway.trusted_proxies_missing) ──
+// Control UI chỉ chạy local → trust loopback proxy là đủ và an toàn
+cfg.gateway = cfg.gateway || {};
+if (!cfg.gateway.trustedProxies || cfg.gateway.trustedProxies.length === 0) {
+  cfg.gateway.trustedProxies = ['127.0.0.1'];
+}
+
+// ── Fix: gateway.controlUi.allowInsecureAuth (warning: gateway.control_ui.insecure_auth) ──
+// Tắt flag insecure auth — không cần thiết cho local-only setup
+cfg.gateway.controlUi = cfg.gateway.controlUi || {};
+if (cfg.gateway.controlUi.allowInsecureAuth === true) {
+  cfg.gateway.controlUi.allowInsecureAuth = false;
+  console.log('Fixed: gateway.controlUi.allowInsecureAuth set to false');
+}
+
+// ── Fix: gateway.nodes.denyCommands (warning: gateway.nodes.deny_commands_ineffective) ──
+// Xóa các command name không hợp lệ (không có trong OpenClaw defaults)
+// Chỉ giữ lại các command name hợp lệ đã biết
+const VALID_COMMAND_PREFIXES = [
+  'canvas.', 'system.', 'tools.', 'agents.', 'memory.',
+  'web.', 'files.', 'shell.', 'browser.', 'search.',
+  'reminders.list', 'camera.list',
+];
+if (cfg.gateway && cfg.gateway.nodes && Array.isArray(cfg.gateway.nodes.denyCommands)) {
+  const before = cfg.gateway.nodes.denyCommands.length;
+  cfg.gateway.nodes.denyCommands = cfg.gateway.nodes.denyCommands.filter(cmd => {
+    return VALID_COMMAND_PREFIXES.some(prefix => cmd === prefix || cmd.startsWith(prefix));
+  });
+  const removed = before - cfg.gateway.nodes.denyCommands.length;
+  if (removed > 0) {
+    console.log(`Fixed: removed ${removed} invalid denyCommands entries`);
+  }
+  if (cfg.gateway.nodes.denyCommands.length === 0) {
+    delete cfg.gateway.nodes.denyCommands;
+  }
+}
+
 fs.writeFileSync(process.env.GTALK_CONFIG, JSON.stringify(cfg, null, 2));
 console.log('Config updated. plugins.allow:', cfg.plugins.allow);
 NODE
@@ -184,7 +221,7 @@ ok "OpenClaw config updated"
 echo "🔄 Restart OpenClaw gateway..."
 openclaw gateway install 2>/dev/null || true
 openclaw gateway restart 2>/dev/null || openclaw gateway 2>/dev/null &
-sleep 5
+sleep 10
 
 # ── Kiểm tra ─────────────────────────────────────────────────
 STATUS=$(openclaw plugins list 2>/dev/null | grep gtalk-openclaw | grep -c loaded || true)
@@ -204,7 +241,7 @@ echo "Webhook URL: $WEBHOOK_URL"
 
 # ── Chờ plugin route sẵn sàng ────────────────────────────────
 echo "⏳ Chờ plugin route sẵn sàng..."
-MAX_WAIT=30
+MAX_WAIT=60
 WAITED=0
 while [ "$WAITED" -lt "$MAX_WAIT" ]; do
   HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)
@@ -216,7 +253,8 @@ while [ "$WAITED" -lt "$MAX_WAIT" ]; do
   WAITED=$((WAITED + 2))
 done
 if [ "$WAITED" -ge "$MAX_WAIT" ]; then
-  warn "Plugin route chưa sẵn sàng sau ${MAX_WAIT}s — thử setup channel thủ công sau"
+  warn "Plugin route chưa sẵn sàng sau ${MAX_WAIT}s — gateway có thể chưa load xong."
+  warn "Chạy thủ công sau khi gateway sẵn sàng: openclaw plugins list | grep gtalk"
 fi
 
 # ── Tự động setup channel cho từng userId ────────────────────
@@ -228,10 +266,12 @@ if [ -n "$ALLOW_FROM" ]; then
     USER_ID="$(echo "$USER_ID" | tr -d ' ')"
     [ -z "$USER_ID" ] && continue
     echo "   → userId: $USER_ID"
-    RESPONSE=$(curl -s --max-time 30 -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
+    RESPONSE=$(curl -s --max-time 60 -X POST http://127.0.0.1:18789/gtalk-openclaw/setup-channel \
       -H 'Content-Type: application/json' \
-      -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}" 2>/dev/null || echo '{"error":"curl timeout"}')
+      -d "{\"oaId\": \"$OA_ID\", \"oaToken\": \"$OA_TOKEN\", \"userId\": \"$USER_ID\", \"webhookUrl\": \"$WEBHOOK_URL\"}" 2>/dev/null || echo '{"error":"curl timeout — GTalk API không phản hồi trong 60s"}')
     echo "RESPONSE: $RESPONSE"
+    # Nếu thành công (có channelId), in ra rõ ràng
+    echo "$RESPONSE" | grep -q '"channelId"' && ok "Channel setup thành công cho userId=$USER_ID" || true
   done
   ok "Setup channel xong!"
 else
