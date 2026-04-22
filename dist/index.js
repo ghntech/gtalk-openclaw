@@ -2,6 +2,7 @@ import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
 import { gtalkPlugin } from "./src/channel.js";
 import { verifySignature } from "./src/webhook.js";
 import { GtalkClient, ReceiptStatus } from "./src/client.js";
+import { DEFAULT_MEDIA_TMP_DIR } from "./src/media-dir.js";
 async function readJsonBody(req) {
     return new Promise((resolve, reject) => {
         let data = "";
@@ -105,7 +106,7 @@ export default defineChannelPluginEntry({
                                         ? detail.FileName.split(".").pop()
                                         : attachImage ? "jpg" : attachVideo ? "mp4" : "bin";
                                     const mediaTmpDir = api.config?.channels?.["gtalk-openclaw"]?.mediaTmpDir
-                                        ?? `${process.env.HOME ?? "/root"}/.openclaw/workspace/tmp/images`;
+                                        ?? DEFAULT_MEDIA_TMP_DIR;
                                     const tmpPath = `${mediaTmpDir.replace(/\/$/, "")}/gtalk-${fileId}.${ext}`;
                                     const { writeFile } = await import("fs/promises");
                                     const buf = Buffer.from(await fileResp.arrayBuffer());
