@@ -15,7 +15,8 @@
       "apiUrl": "https://mbff.ghn.vn",
       "allowFrom": [
         "GTALK_USER_ID_ĐƯỢC_PHÉP"
-      ]
+      ],
+      "mediaTmpDir": "~/.openclaw/workspace/tmp/images"
     }
   }
 }

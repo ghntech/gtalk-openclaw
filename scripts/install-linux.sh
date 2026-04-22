@@ -53,6 +53,11 @@ echo "📦 Cài dependencies..."
 (cd "$PLUGIN_DIR" && npm install --omit dev) || err "npm install thất bại"
 ok "Dependencies installed"
 
+# ── Tạo thư mục media tmp ────────────────────────────────────
+MEDIA_TMP_DIR="$HOME/.openclaw/workspace/tmp/images"
+mkdir -p "$MEDIA_TMP_DIR"
+ok "Media tmp dir: $MEDIA_TMP_DIR"
+
 # ── Install plugin ───────────────────────────────────────────
 echo "🔌 Cài plugin..."
 # Xóa config cũ để tránh validation lỗi khi uninstall
