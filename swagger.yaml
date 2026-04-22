@@ -1,0 +1,1384 @@
+openapi: 3.0.3
+info:
+  title: GHN GTalk API
+  description: |
+    API specification for the GHN GTalk messaging platform.
+    
+    ## Authentication
+    All requests require an `oaToken` field in the request body, formatted as `{username}:{password}`.
+    
+    ## Base URLs
+    - **Production:** `https://mbff.ghn.vn`
+    - **Test/Staging:** `https://test-api.mbff.ghn.tech`
+  version: 1.0.0
+  contact:
+    name: GHN Tech
+    url: https://github.com/ghntech/n8n-nodes-gtalk
+
+servers:
+  - url: https://mbff.ghn.vn
+    description: Production server
+  - url: https://test-api.mbff.ghn.tech
+    description: Test / Staging server
+
+tags:
+  - name: Messages
+    description: Send messages to GTalk channels
+  - name: Files
+    description: Upload and manage files
+  - name: Channels
+    description: Create and configure GTalk channels
+  - name: Receipts
+    description: Send message read/delivery receipts
+  - name: Modify
+    description: Edit or delete existing messages
+
+paths:
+  /api/gtalk/send-message:
+    post:
+      tags:
+        - Messages
+      summary: Send a message
+      description: |
+        Send a message to a GTalk channel. Supports multiple content types:
+        - **Text** — plain text with optional parse mode
+        - **Template** — structured template with icon, title, content, and action buttons
+        - **Photo** — image attachment with optional caption
+        - **File** — file attachment
+        - **Video** — video attachment with optional caption
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            examples:
+              sendText:
+                summary: Send a text message
+                value:
+                  channelId: "414416020666490880"
+                  clientMsgId: "1767846364"
+                  content:
+                    text: "Hello, World!"
+                    parseMode: "PLAIN_TEXT"
+                  oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              sendTemplate:
+                summary: Send a template message
+                value:
+                  channelId: "414416020666490880"
+                  clientMsgId: "1767846365"
+                  content:
+                    template:
+                      templateId: "tmpl_001"
+                      shortMessage: "You have a new notification"
+                      data: '{"icon_url":"https://example.com/icon.png","title":"Order Update","content":"Your order #12345 has been shipped.<br/>Track it now.","actions":[{"text":"Track Order","style":"primary","type":"browser_external","url":"https://example.com/track/12345"}]}'
+                  oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              sendPhoto:
+                summary: Send a photo message
+                value:
+                  channelId: "414416020666490880"
+                  clientMsgId: "1767846364"
+                  content:
+                    attachment:
+                      caption: "Check out this photo!"
+                      items:
+                        - image:
+                            fileId: "2009120434341085184"
+                            width: 680
+                            height: 453
+                  oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              sendFile:
+                summary: Send a file message
+                value:
+                  channelId: "414416020666490880"
+                  clientMsgId: "1767846366"
+                  content:
+                    attachment:
+                      items:
+                        - file:
+                            fileId: "2009120434341085185"
+                            fileName: "document.pdf"
+                            mimeType: "application/pdf"
+                            fileSize: 204800
+                  oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              sendVideo:
+                summary: Send a video message
+                value:
+                  channelId: "414416020666490880"
+                  clientMsgId: "1767846367"
+                  content:
+                    attachment:
+                      caption: "Watch this video!"
+                      items:
+                        - video:
+                            fileId: "2009120434341085186"
+                            width: 1280
+                            height: 720
+                            duration: 30
+                  oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+      responses:
+        '200':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResponse'
+              example:
+                data:
+                  globalMsgId: "450267410683305984"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/initiate-upload:
+    post:
+      tags:
+        - Files
+      summary: Initiate a file upload session
+      description: |
+        Initiates a file upload session and returns presigned S3 URLs for uploading the file and its thumbnail.
+        
+        After receiving the presigned URLs:
+        1. Upload the original file to `PresignedURL` via HTTP PUT
+        2. Upload the thumbnail image to `PresignedThumbURL` via HTTP PUT
+        3. Call `/api/gtalk/complete-upload` with the `UploadId` to finalize
+      operationId: initiateUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitiateUploadRequest'
+            example:
+              ChannelId: "414416020666490880"
+              FileName: "Lifestyle.jpg"
+              FileSize: "98351"
+              MimeType: "image/jpeg"
+              Metadata: '{"width": 680, "height": 453}'
+              oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+      responses:
+        '200':
+          description: Upload session initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitiateUploadResponse'
+              example:
+                data:
+                  ExpiresAt: "1767850213"
+                  PresignedThumbURL: "https://s3-sgn10.fptcloud.com/gtalk-file-test/2026/01/08/414416020666490880/71b449b9-0113-469f-86f0-a67141a93018_thumb?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."
+                  PresignedURL: "https://s3-sgn10.fptcloud.com/gtalk-file-test/2026/01/08/414416020666490880/71b449b9-0113-469f-86f0-a67141a93018?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."
+                  UploadId: "2009120434341085184"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/complete-upload:
+    post:
+      tags:
+        - Files
+      summary: Complete a file upload session
+      description: |
+        Finalizes a file upload session after the file (and optional thumbnail) have been uploaded to the presigned S3 URLs.
+        Returns the permanent file record including the `Id` to use in subsequent send-message calls.
+      operationId: completeUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+            example:
+              oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              UploadId: "2009120434341085184"
+      responses:
+        '200':
+          description: Upload completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteUploadResponse'
+              example:
+                data:
+                  ChannelId: "414416020666490880"
+                  CreatedAt: "1767846785"
+                  CreatedBy: "1970077287463710720"
+                  FileName: "Lifestyle.jpg"
+                  FileSize: "98351"
+                  Id: "2009120434341085184"
+                  MimeType: "image/jpeg"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/get-file:
+    post:
+      tags:
+        - Files
+      summary: Get file download URL
+      description: |
+        Retrieves a temporary presigned download URL for an uploaded file (video, photo, image, document, etc.).
+        Use this endpoint when you need to provide a direct download link for a file stored in GTalk.
+
+        The returned `PresignedURL` is time-limited and expires in approximately **1 hour**.
+        Generate a fresh URL each time you need to serve the file to a user.
+      operationId: getFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetFileRequest'
+            example:
+              oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              Id: "2010658516932628480"
+      responses:
+        '200':
+          description: File download URL retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetFileResponse'
+              example:
+                data:
+                  FileName: "Mastering AI Agents.pdf"
+                  PresignedURL: "https://s3-sgn10.fptcloud.com/gtalk-file-test/2026/01/12/414416020666490880/9340a3ae-cb62-4544-9dcc-c2162269f347?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=M6REZF53HJ43PDAX41MJ%2F20260422%2Fsgn10%2Fs3%2Faws4_request&X-Amz-Date=20260422T075034Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&x-id=GetObject&X-Amz-Signature=0cb5dd18e7bb99de8ffab767c09a6c982476fb6cc0f3e2f39737dacd90d4e03f"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/detail-file:
+    post:
+      tags:
+        - Files
+      summary: Get file details
+      description: |
+        Retrieves metadata and details for an uploaded file by its ID.
+        Used to obtain dimensions (width/height for images/videos) and duration (for videos) when sending a message with an existing File ID.
+      operationId: detailFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetailFileRequest'
+            example:
+              oaToken: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+              Id: "2009551222366867456"
+      responses:
+        '200':
+          description: File details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailFileResponse'
+              example:
+                data:
+                  ChannelId: "776912982"
+                  CreatedAt: "1767949378"
+                  CreatedBy: "1985291631184633856"
+                  FileName: "Lifestyle.jpg"
+                  FileSize: "98351"
+                  Id: "2009551222366867456"
+                  Metadata: '{"width": 680, "height": 453}'
+                  MimeType: "image/jpeg"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/create-server-direct-channel:
+    post:
+      tags:
+        - Channels
+      summary: Create a server direct channel
+      description: |
+        Creates a direct message channel between an OA (Official Account) and a specific user.
+        Use this endpoint to obtain a `channelId` before sending messages to a user who does not yet have an existing channel.
+      operationId: createServerDirectChannel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServerDirectChannelRequest'
+            example:
+              oaId: "2037107123134361600"
+              oaToken: "2037107123134361600:oFteX954KLceeZqcs2coB1FbmojxJlls"
+              userId: "1942438010055499776"
+      responses:
+        '200':
+          description: Direct channel created (or already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateServerDirectChannelResponse'
+              example:
+                data:
+                  channelId: "2037112448931287040"
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/config-channel-processing:
+    post:
+      tags:
+        - Channels
+      summary: Configure channel processing
+      description: |
+        Configures the webhook processing settings for a specific channel.
+        Use this endpoint to set up (or update) the webhook that GTalk will call when events occur on the channel.
+
+        ## Payload Verification
+
+        When `webhookSecret` is set, GTalk signs every outbound webhook request using HMAC-SHA256.
+
+        **Signature computation:**
+        - Input: `oaId + jsonPayload + timestamp + webhookSecret`
+        - Algorithm: SHA-256
+        - Output: hex digest
+        - Header: `x-gtalk-event-signature: mac=<hex>`
+
+        Always use a constant-time comparison (e.g. `crypto.timingSafeEqual`) to verify the signature.
+
+        ## Webhook Payload Fields
+
+        | Field         | Type    | Description |
+        |---------------|---------|-------------|
+        | `globalMsgId` | string  | Global message ID |
+        | `clientMsgId` | string  | Client-generated message ID |
+        | `oaId`        | string  | OA (Official Account) ID |
+        | `channelId`   | string  | Channel ID |
+        | `senderId`    | string  | Sender's user ID |
+        | `content`     | string  | Message content (text string for text messages) |
+        | `contentType` | integer | Message type — `0` = text, `3` = attachment (photo, file, or video) |
+        | `timestamp`   | string  | Event timestamp in milliseconds since epoch |
+      operationId: configChannelProcessing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigChannelProcessingRequest'
+            example:
+              oaId: "2037107123134361600"
+              oaToken: "2037107123134361600:oFteX954KLceeZqcs2coB1FbmojxJlls"
+              channelId: "2037112448931287040"
+              processingConfig:
+                webhook:
+                  enabled: true
+                  webhookURL: "https://swift-comet-37.webhook.cool"
+                  webhookSecret: "H6kWhg0XGeYTjw6wnPX9"
+                  webhookResponseTimeoutInSecond: 30
+                  method: "POST"
+                  headers:
+                    Content-Type: "application/json"
+                  retry:
+                    maxRetries: 3
+                    retryDelayMs: 1000
+                    retryOnStatusCodes: [500, 502, 503]
+      responses:
+        '200':
+          description: Channel processing configured successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+              example:
+                data: {}
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/send-message-receipt:
+    post:
+      tags:
+        - Receipts
+      summary: Send message receipt
+      description: |
+        Reports read/delivery receipts to GTalk for one or more messages in a channel.
+        Use this endpoint to inform GTalk that a recipient has received or seen a message,
+        or to signal typing/thinking/processing states.
+
+        You can send multiple statuses (e.g. SEEN + TYPING) in a single call by including multiple entries in the `receipts` array.
+
+        > **Important:** Pass all ID fields (`oaId`, `channelId`, `globalMsgId`) as **strings**, not numbers.
+        > GTalk uses 64-bit snowflake IDs that exceed JavaScript's safe integer range.
+      operationId: sendMessageReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageReceiptRequest'
+            examples:
+              singleReceipt:
+                summary: Single SEEN receipt
+                value:
+                  oaId: "2037107123134361600"
+                  oaToken: "your-oa-token-here"
+                  receiptMessage:
+                    channelId: "2037112448931287040"
+                    receipts:
+                      - status: 2
+                        receiptedTs: 1712567089000
+                        globalMsgId: "2042140254245965824"
+              multipleReceipts:
+                summary: Multiple receipts in one call (SEEN + TYPING)
+                value:
+                  oaId: "2037107123134361600"
+                  oaToken: "your-oa-token-here"
+                  receiptMessage:
+                    channelId: "2037112448931287040"
+                    receipts:
+                      - status: 2
+                        receiptedTs: 1712567089000
+                        globalMsgId: "2042140254245965824"
+                      - status: 3
+                        receiptedTs: 1712567089001
+                        globalMsgId: "2042140254245965824"
+      responses:
+        '200':
+          description: Receipt sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+              example:
+                data: {}
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gtalk/modify-message:
+    post:
+      tags:
+        - Modify
+      summary: Modify (edit or delete) a message
+      description: |
+        Edits or deletes an existing message in a channel.
+        - Use `action = 1` (`MA_EDIT`) to update the message content.
+        - Use `action = 2` (`MA_DELETE`) to delete the message.
+
+        When editing (`action = 1`), the `content` field is required and supports the same structure as `send-message`
+        (text, template, photo, file, or video).
+      operationId: modifyMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModifyMessageRequest'
+            examples:
+              editMessage:
+                summary: Edit a message
+                value:
+                  channelId: 987654321
+                  globalMsgId: 444555666
+                  oaToken: "your-oa-token-here"
+                  action: 1
+                  content:
+                    text: "Updated message content here"
+              deleteMessage:
+                summary: Delete a message
+                value:
+                  channelId: 987654321
+                  globalMsgId: 444555666
+                  oaToken: "your-oa-token-here"
+                  action: 2
+      responses:
+        '200':
+          description: Message modified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyDataResponse'
+              example:
+                data: {}
+                errorCode: "success"
+                error: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized — invalid oaToken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Note: The following two endpoints are external S3 presigned URLs returned by /api/gtalk/initiate-upload.
+  # They are documented here for reference only and are not part of the GTalk API server.
+  /s3-presigned-url/upload-file:
+    put:
+      tags:
+        - Files
+      summary: Upload file to S3 presigned URL
+      description: |
+        Upload the original file binary to the `PresignedURL` returned by `/api/gtalk/initiate-upload`.
+        
+        **Note:** This is an S3 presigned URL — the actual URL is dynamic and returned by the initiate-upload endpoint.
+        Use HTTP PUT with the file binary as the request body and set `Content-Type` to the file's MIME type.
+        A `200` HTTP status code indicates success.
+      operationId: uploadFileToS3
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: Raw binary content of the file to upload
+      responses:
+        '200':
+          description: File uploaded successfully
+        '403':
+          description: Forbidden — presigned URL expired or invalid
+        '400':
+          description: Bad request
+
+  /s3-presigned-url/upload-thumbnail:
+    put:
+      tags:
+        - Files
+      summary: Upload thumbnail to S3 presigned URL
+      description: |
+        Upload the thumbnail image binary to the `PresignedThumbURL` returned by `/api/gtalk/initiate-upload`.
+        
+        **Note:** This is an S3 presigned URL — the actual URL is dynamic and returned by the initiate-upload endpoint.
+        Use HTTP PUT with the thumbnail binary as the request body and set `Content-Type` to the image MIME type.
+        
+        For images: resize to max 600×600px (maintaining aspect ratio) before uploading.
+        For videos: extract the first frame, then resize to max 600×600px.
+        A `200` HTTP status code indicates success.
+      operationId: uploadThumbnailToS3
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+              description: Raw binary content of the thumbnail image
+          image/png:
+            schema:
+              type: string
+              format: binary
+              description: Raw binary content of the thumbnail image
+      responses:
+        '200':
+          description: Thumbnail uploaded successfully
+        '403':
+          description: Forbidden — presigned URL expired or invalid
+        '400':
+          description: Bad request
+
+components:
+  schemas:
+    # ─── Authentication ───────────────────────────────────────────────────────
+    OaToken:
+      type: string
+      description: Authentication token in the format `{username}:{password}`
+      example: "1970077287463710720:q1dTKYPcEhGmOva6XhJcXn34Yq1pbBaO"
+
+    # ─── Common Response Wrapper ──────────────────────────────────────────────
+    BaseResponse:
+      type: object
+      properties:
+        errorCode:
+          type: string
+          description: Error code. `"success"` indicates a successful response.
+          example: "success"
+        error:
+          type: object
+          description: Error details object. Empty on success.
+          properties:
+            errorMessage:
+              type: string
+              description: Human-readable error message
+          example: {}
+
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+      example:
+        errorCode: "error"
+        error:
+          errorMessage: "Invalid oaToken"
+
+    # ─── Parse Mode ───────────────────────────────────────────────────────────
+    ParseMode:
+      type: string
+      enum:
+        - PLAIN_TEXT
+        - MARKDOWN
+        - HTML
+      default: PLAIN_TEXT
+      description: How to parse the message content
+
+    # ─── Message Content Types ────────────────────────────────────────────────
+    TextContent:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: The plain text or formatted content of the message
+          example: "Hello, World!"
+        parseMode:
+          $ref: '#/components/schemas/ParseMode'
+
+    TemplateAction:
+      type: object
+      required:
+        - text
+        - url
+      properties:
+        text:
+          type: string
+          description: Button label text
+          example: "Track Order"
+        style:
+          type: string
+          enum:
+            - primary
+            - secondary
+          default: primary
+          description: Visual style of the button
+        type:
+          type: string
+          enum:
+            - deeplink
+            - browser_internal
+            - browser_external
+          default: browser_external
+          description: Action type that determines how the URL is opened
+        url:
+          type: string
+          format: uri
+          description: URL to open when the button is tapped
+          example: "https://example.com/track/12345"
+
+    TemplateData:
+      type: object
+      description: Template data fields. Serialized as a JSON string in the `data` field.
+      properties:
+        icon_url:
+          type: string
+          format: uri
+          description: URL of the icon displayed in the template
+          example: "https://example.com/icon.png"
+        title:
+          type: string
+          description: Title of the template message
+          example: "Order Update"
+        content:
+          type: string
+          description: Main content body. Supports HTML tags such as `<br/>`.
+          example: "Your order #12345 has been shipped.<br/>Track it now."
+        actions:
+          type: array
+          description: List of action buttons
+          items:
+            $ref: '#/components/schemas/TemplateAction'
+
+    Template:
+      type: object
+      required:
+        - templateId
+        - shortMessage
+        - data
+      properties:
+        templateId:
+          type: string
+          description: The ID of the template to use
+          example: "tmpl_001"
+        shortMessage:
+          type: string
+          description: A short summary of the template message (used as fallback/preview text)
+          example: "You have a new notification"
+        data:
+          type: string
+          description: |
+            JSON-serialized string of template data fields (icon_url, title, content, actions).
+            See `TemplateData` schema for the structure.
+          example: '{"icon_url":"https://example.com/icon.png","title":"Order Update","content":"Your order #12345 has been shipped.","actions":[{"text":"Track Order","style":"primary","type":"browser_external","url":"https://example.com/track/12345"}]}'
+
+    TemplateContent:
+      type: object
+      required:
+        - template
+      properties:
+        template:
+          $ref: '#/components/schemas/Template'
+        parseMode:
+          $ref: '#/components/schemas/ParseMode'
+
+    ImageItem:
+      type: object
+      required:
+        - fileId
+        - width
+        - height
+      properties:
+        fileId:
+          type: string
+          description: The file ID of the uploaded image (returned by complete-upload)
+          example: "2009120434341085184"
+        width:
+          type: integer
+          description: Width of the image in pixels
+          example: 680
+        height:
+          type: integer
+          description: Height of the image in pixels
+          example: 453
+
+    FileItem:
+      type: object
+      required:
+        - fileId
+        - fileName
+        - mimeType
+        - fileSize
+      properties:
+        fileId:
+          type: string
+          description: The file ID of the uploaded file (returned by complete-upload)
+          example: "2009120434341085185"
+        fileName:
+          type: string
+          description: Original file name
+          example: "document.pdf"
+        mimeType:
+          type: string
+          description: MIME type of the file
+          example: "application/pdf"
+        fileSize:
+          type: integer
+          description: File size in bytes
+          example: 204800
+
+    VideoItem:
+      type: object
+      required:
+        - fileId
+        - width
+        - height
+        - duration
+      properties:
+        fileId:
+          type: string
+          description: The file ID of the uploaded video (returned by complete-upload)
+          example: "2009120434341085186"
+        width:
+          type: integer
+          description: Width of the video in pixels
+          example: 1280
+        height:
+          type: integer
+          description: Height of the video in pixels
+          example: 720
+        duration:
+          type: integer
+          description: Duration of the video in seconds
+          example: 30
+
+    AttachmentItem:
+      type: object
+      description: One item in an attachment. Exactly one of `image`, `file`, or `video` should be present.
+      properties:
+        image:
+          $ref: '#/components/schemas/ImageItem'
+        file:
+          $ref: '#/components/schemas/FileItem'
+        video:
+          $ref: '#/components/schemas/VideoItem'
+
+    AttachmentContent:
+      type: object
+      required:
+        - items
+      properties:
+        caption:
+          type: string
+          description: Optional caption for the attachment (supported for photo and video)
+          example: "Check out this photo!"
+        items:
+          type: array
+          description: List of attachment items
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AttachmentItem'
+
+    MessageContent:
+      description: |
+        The content of the message. Use one of the following structures depending on the message type:
+        - **Text message:** include `text` (and optionally `parseMode`)
+        - **Template message:** include `template` (and optionally `parseMode`)
+        - **Photo/File/Video message:** include `attachment`
+      oneOf:
+        - $ref: '#/components/schemas/TextContent'
+        - $ref: '#/components/schemas/TemplateContent'
+        - type: object
+          required:
+            - attachment
+          properties:
+            attachment:
+              $ref: '#/components/schemas/AttachmentContent'
+
+    # ─── Send Message ─────────────────────────────────────────────────────────
+    SendMessageRequest:
+      type: object
+      required:
+        - channelId
+        - clientMsgId
+        - content
+        - oaToken
+      properties:
+        channelId:
+          type: string
+          description: The ID of the target channel
+          example: "414416020666490880"
+        clientMsgId:
+          type: string
+          description: |
+            A client-generated unique message ID used for deduplication.
+            Typically a Unix timestamp in milliseconds as a string.
+          example: "1767846364"
+        content:
+          $ref: '#/components/schemas/MessageContent'
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+
+    SendMessageResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                globalMsgId:
+                  type: string
+                  description: The globally unique message ID assigned by the server
+                  example: "450267410683305984"
+
+    # ─── Initiate Upload ──────────────────────────────────────────────────────
+    InitiateUploadRequest:
+      type: object
+      required:
+        - ChannelId
+        - FileName
+        - FileSize
+        - MimeType
+        - oaToken
+      properties:
+        ChannelId:
+          type: string
+          description: The ID of the channel this file belongs to
+          example: "414416020666490880"
+        FileName:
+          type: string
+          description: Original file name including extension
+          example: "Lifestyle.jpg"
+        FileSize:
+          type: string
+          description: File size in bytes (as a string)
+          example: "98351"
+        MimeType:
+          type: string
+          description: MIME type of the file
+          example: "image/jpeg"
+        Metadata:
+          type: string
+          description: |
+            Optional JSON-serialized metadata string.
+            - For images: `{"width": 680, "height": 453}`
+            - For videos: `{"width": 1280, "height": 720, "duration": 30}`
+          example: '{"width": 680, "height": 453}'
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+
+    InitiateUploadData:
+      type: object
+      properties:
+        ExpiresAt:
+          type: string
+          description: Unix timestamp (seconds) when the presigned URLs expire
+          example: "1767850213"
+        PresignedURL:
+          type: string
+          format: uri
+          description: S3 presigned URL for uploading the original file via HTTP PUT
+          example: "https://s3-sgn10.fptcloud.com/gtalk-file-test/..."
+        PresignedThumbURL:
+          type: string
+          format: uri
+          description: S3 presigned URL for uploading the thumbnail image via HTTP PUT
+          example: "https://s3-sgn10.fptcloud.com/gtalk-file-test/..._thumb?..."
+        UploadId:
+          type: string
+          description: The upload session ID, used to complete the upload
+          example: "2009120434341085184"
+
+    InitiateUploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/InitiateUploadData'
+
+    # ─── Complete Upload ──────────────────────────────────────────────────────
+    CompleteUploadRequest:
+      type: object
+      required:
+        - oaToken
+        - UploadId
+      properties:
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        UploadId:
+          type: string
+          description: The upload session ID returned by initiate-upload
+          example: "2009120434341085184"
+
+    FileRecord:
+      type: object
+      properties:
+        ChannelId:
+          type: string
+          description: The channel ID this file belongs to
+          example: "414416020666490880"
+        CreatedAt:
+          type: string
+          description: Unix timestamp (seconds) when the file was created
+          example: "1767846785"
+        CreatedBy:
+          type: string
+          description: User ID of the uploader
+          example: "1970077287463710720"
+        FileName:
+          type: string
+          description: Original file name
+          example: "Lifestyle.jpg"
+        FileSize:
+          type: string
+          description: File size in bytes (as a string)
+          example: "98351"
+        Id:
+          type: string
+          description: Permanent file ID to use in send-message requests
+          example: "2009120434341085184"
+        MimeType:
+          type: string
+          description: MIME type of the file
+          example: "image/jpeg"
+        Metadata:
+          type: string
+          description: |
+            JSON-serialized metadata string (present in detail-file response).
+            - For images: `{"width": 680, "height": 453}`
+            - For videos: `{"width": 1280, "height": 720, "duration": 30}`
+          example: '{"width": 680, "height": 453}'
+
+    CompleteUploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/FileRecord'
+
+    # ─── Get File ─────────────────────────────────────────────────────────────
+    GetFileRequest:
+      type: object
+      required:
+        - oaToken
+        - Id
+      properties:
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        Id:
+          type: string
+          description: The file ID to retrieve the download URL for
+          example: "2010658516932628480"
+
+    GetFileData:
+      type: object
+      properties:
+        FileName:
+          type: string
+          description: Original file name
+          example: "Mastering AI Agents.pdf"
+        PresignedURL:
+          type: string
+          format: uri
+          description: Temporary presigned URL to download the file. Valid for approximately 1 hour.
+          example: "https://s3-sgn10.fptcloud.com/gtalk-file-test/..."
+
+    GetFileResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/GetFileData'
+
+    # ─── Detail File ──────────────────────────────────────────────────────────
+    DetailFileRequest:
+      type: object
+      required:
+        - oaToken
+        - Id
+      properties:
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        Id:
+          type: string
+          description: The file ID to retrieve details for
+          example: "2009551222366867456"
+
+    DetailFileResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/FileRecord'
+
+    # ─── Empty Data Response ──────────────────────────────────────────────────
+    EmptyDataResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              description: Empty object on success
+              example: {}
+
+    # ─── Create Server Direct Channel ─────────────────────────────────────────
+    CreateServerDirectChannelRequest:
+      type: object
+      required:
+        - oaId
+        - oaToken
+        - userId
+      properties:
+        oaId:
+          type: string
+          description: The OA (Official Account) ID
+          example: "2037107123134361600"
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        userId:
+          type: string
+          description: The target user's ID
+          example: "1942438010055499776"
+
+    CreateServerDirectChannelResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                channelId:
+                  type: string
+                  description: The newly created (or existing) direct channel ID. Use this as `channelId` in subsequent send-message requests.
+                  example: "2037112448931287040"
+
+    # ─── Config Channel Processing ────────────────────────────────────────────
+    WebhookRetry:
+      type: object
+      description: Retry policy for failed webhook deliveries
+      properties:
+        maxRetries:
+          type: integer
+          description: Maximum number of retry attempts
+          example: 3
+        retryDelayMs:
+          type: integer
+          description: Delay between retries in milliseconds
+          example: 1000
+        retryOnStatusCodes:
+          type: array
+          description: HTTP status codes that should trigger a retry
+          items:
+            type: integer
+          example: [500, 502, 503]
+
+    WebhookConfig:
+      type: object
+      required:
+        - enabled
+        - webhookURL
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the webhook is active
+          example: true
+        webhookURL:
+          type: string
+          format: uri
+          description: The URL GTalk will POST events to
+          example: "https://swift-comet-37.webhook.cool"
+        webhookSecret:
+          type: string
+          description: Secret used to sign webhook payloads for verification (HMAC-SHA256)
+          example: "H6kWhg0XGeYTjw6wnPX9"
+        webhookResponseTimeoutInSecond:
+          type: integer
+          description: "Timeout in seconds to wait for a response from the webhook (default: 30)"
+          default: 30
+          example: 30
+        method:
+          type: string
+          description: HTTP method for the webhook call
+          example: "POST"
+        headers:
+          type: object
+          description: Custom HTTP headers to include in the webhook request
+          additionalProperties:
+            type: string
+          example: {"Content-Type": "application/json"}
+        retry:
+          $ref: '#/components/schemas/WebhookRetry'
+
+    ProcessingConfig:
+      type: object
+      properties:
+        webhook:
+          $ref: '#/components/schemas/WebhookConfig'
+
+    ConfigChannelProcessingRequest:
+      type: object
+      required:
+        - oaId
+        - oaToken
+        - channelId
+        - processingConfig
+      properties:
+        oaId:
+          type: string
+          description: The OA (Official Account) ID
+          example: "2037107123134361600"
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        channelId:
+          type: string
+          description: The channel to configure
+          example: "2037112448931287040"
+        processingConfig:
+          $ref: '#/components/schemas/ProcessingConfig'
+
+    # ─── Send Message Receipt ─────────────────────────────────────────────────
+    ReceiptStatus:
+      type: integer
+      description: |
+        Receipt status code:
+        - `0` — `RS_UNKNOWN`: Unknown status
+        - `1` — `RECEIVED`: The recipient has received the message
+        - `2` — `SEEN`: The recipient or another sender device has read the message
+        - `3` — `TYPING`: A user is typing
+        - `4` — `REACTION_SEEN`: The recipient has seen the reaction on a message
+        - `5` — `REACTION_UNSEEN`: The recipient has not yet seen the reaction on a message
+        - `6` — `THINKING`: A user is thinking
+        - `7` — `PROCESSING`: A user is processing
+      enum: [0, 1, 2, 3, 4, 5, 6, 7]
+      example: 2
+
+    Receipt:
+      type: object
+      required:
+        - status
+        - receiptedTs
+        - globalMsgId
+      properties:
+        status:
+          $ref: '#/components/schemas/ReceiptStatus'
+        receiptedTs:
+          type: number
+          description: Timestamp of the receipt event (milliseconds since epoch)
+          example: 1712567089000
+        globalMsgId:
+          type: string
+          description: Global message ID of the message being receipted (pass as string to avoid 64-bit precision loss)
+          example: "2042140254245965824"
+
+    ReceiptMessage:
+      type: object
+      required:
+        - channelId
+        - receipts
+      properties:
+        channelId:
+          type: string
+          description: The channel the messages belong to
+          example: "2037112448931287040"
+        receipts:
+          type: array
+          description: List of receipt entries. You can send multiple statuses (e.g. SEEN + TYPING) in a single call.
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Receipt'
+
+    SendMessageReceiptRequest:
+      type: object
+      required:
+        - oaId
+        - oaToken
+        - receiptMessage
+      properties:
+        oaId:
+          type: string
+          description: The OA (Official Account) ID (pass as string to avoid 64-bit precision loss)
+          example: "2037107123134361600"
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        receiptMessage:
+          $ref: '#/components/schemas/ReceiptMessage'
+
+    # ─── Modify Message ───────────────────────────────────────────────────────
+    ModifyAction:
+      type: integer
+      description: |
+        Modify action:
+        - `1` — `MA_EDIT`: Edit the message with the new `content`
+        - `2` — `MA_DELETE`: Delete the message
+      enum: [1, 2]
+      example: 1
+
+    ModifyMessageRequest:
+      type: object
+      required:
+        - channelId
+        - globalMsgId
+        - oaToken
+        - action
+      properties:
+        channelId:
+          type: number
+          description: ID of the channel containing the message
+          example: 987654321
+        globalMsgId:
+          type: number
+          description: Global ID of the message to modify
+          example: 444555666
+        oaToken:
+          $ref: '#/components/schemas/OaToken'
+        action:
+          $ref: '#/components/schemas/ModifyAction'
+        content:
+          allOf:
+            - $ref: '#/components/schemas/MessageContent'
+          description: |
+            New message content (required when `action = 1`; ignored for `action = 2`).
+            Supports the same structure as send-message (text, template, photo, file, or video).

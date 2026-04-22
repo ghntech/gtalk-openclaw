@@ -35,6 +35,11 @@ export interface FileDetailResult {
     CreatedAt: string;
     CreatedBy: string;
 }
+export interface GetFileResult {
+    FileName: string;
+    /** Temporary presigned URL to download the file. Valid for approximately 1 hour. */
+    PresignedURL: string;
+}
 export interface CreateDirectChannelResult {
     channelId: string;
 }
@@ -111,6 +116,13 @@ export declare class GtalkClient {
      * Dùng khi có sẵn fileId, tránh upload lại.
      */
     getFileDetail(fileId: string): Promise<FileDetailResult>;
+    /**
+     * Lấy presigned download URL cho một file đã upload.
+     * URL có hiệu lực khoảng 1 giờ — tạo mới mỗi lần cần dùng.
+     *
+     * @param fileId - File ID cần lấy URL tải xuống
+     */
+    getFile(fileId: string): Promise<GetFileResult>;
     /**
      * Gửi media bằng fileId đã có sẵn.
      * Tự gọi detail-file để lấy metadata, không cần upload lại.

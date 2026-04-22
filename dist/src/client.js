@@ -114,6 +114,17 @@ export class GtalkClient {
             Id: fileId,
         });
     }
+    /**
+     * Lấy presigned download URL cho một file đã upload.
+     * URL có hiệu lực khoảng 1 giờ — tạo mới mỗi lần cần dùng.
+     *
+     * @param fileId - File ID cần lấy URL tải xuống
+     */
+    async getFile(fileId) {
+        return this.post("/api/gtalk/get-file", {
+            Id: fileId,
+        });
+    }
     // ─── Send by fileId (reuse) ───────────────────────────────────────────────
     /**
      * Gửi media bằng fileId đã có sẵn.

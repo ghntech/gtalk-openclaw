@@ -43,6 +43,12 @@ export interface FileDetailResult {
   CreatedBy: string;
 }
 
+export interface GetFileResult {
+  FileName: string;
+  /** Temporary presigned URL to download the file. Valid for approximately 1 hour. */
+  PresignedURL: string;
+}
+
 export interface CreateDirectChannelResult {
   channelId: string;
 }
@@ -231,6 +237,18 @@ export class GtalkClient {
    */
   async getFileDetail(fileId: string): Promise<FileDetailResult> {
     return this.post<FileDetailResult>("/api/gtalk/detail-file", {
+      Id: fileId,
+    });
+  }
+
+  /**
+   * Lấy presigned download URL cho một file đã upload.
+   * URL có hiệu lực khoảng 1 giờ — tạo mới mỗi lần cần dùng.
+   *
+   * @param fileId - File ID cần lấy URL tải xuống
+   */
+  async getFile(fileId: string): Promise<GetFileResult> {
+    return this.post<GetFileResult>("/api/gtalk/get-file", {
       Id: fileId,
     });
   }
