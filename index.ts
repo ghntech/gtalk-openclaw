@@ -124,7 +124,9 @@ export default defineChannelPluginEntry({
                   const ext = detail.FileName.includes(".")
                     ? detail.FileName.split(".").pop()!
                     : attachImage ? "jpg" : attachVideo ? "mp4" : "bin";
-                  const tmpPath = `/tmp/gtalk-${fileId}.${ext}`;
+                  const mediaTmpDir: string = (api.config as any)?.channels?.["gtalk-openclaw"]?.mediaTmpDir
+                    ?? `${process.env.HOME ?? "/root"}/.openclaw/workspace/tmp/images`;
+                  const tmpPath = `${mediaTmpDir.replace(/\/$/, "")}/gtalk-${fileId}.${ext}`;
                   const { writeFile } = await import("fs/promises");
                   const buf = Buffer.from(await fileResp.arrayBuffer());
                   await writeFile(tmpPath, buf);
