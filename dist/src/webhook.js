@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 /**
  * Verify webhook signature từ app công ty.
  * Công thức: SHA-256(oaId + jsonPayload + timestamp + webhookSecret)
@@ -6,7 +6,9 @@ import { createHash } from "crypto";
  */
 export function verifySignature(payload, rawBody, signatureHeader, webhookSecret) {
     const data = payload.oaId + rawBody + payload.timestamp + webhookSecret;
-    const expected = createHash("sha256").update(data).digest("hex");
-    const actual = signatureHeader.replace("mac=", "").trim();
-    return expected === actual;
+    const expected = "mac=" + createHash("sha256").update(data).digest("hex");
+    const actual = signatureHeader.trim();
+    if (expected.length !== actual.length)
+        return false;
+    return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }

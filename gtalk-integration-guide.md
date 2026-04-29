@@ -753,7 +753,7 @@ When `webhookSecret` is set, GTalk signs every outbound webhook request so your 
 1. Read the `x-gtalk-event-signature` header from the incoming request.
 2. Extract the raw JSON body as a string (do **not** re-serialize it).
 3. Extract `oaId` and `timestamp` from the parsed payload.
-4. Recompute: `HMAC-SHA256(oaId + jsonPayload + timestamp + webhookSecret)` → hex digest.
+4. Recompute: `SHA-256(oaId + jsonPayload + timestamp + webhookSecret)` → hex digest.
 5. Prepend `mac=` to the hex digest.
 6. Compare with the header value using a **constant-time** equality check.
 7. Reject the request (return `401`) if the values do not match.
@@ -769,12 +769,11 @@ function verifySignature(req, webhookSecret) {
   const { oaId, timestamp } = JSON.parse(jsonPayload);
 
   const input = oaId + jsonPayload + timestamp + webhookSecret;
-  const expected = 'mac=' + crypto
-    .createHmac('sha256', webhookSecret)
-    .update(input)
-    .digest('hex');
+  const hex = crypto.createHash('sha256').update(input).digest('hex');
+  const expected = 'mac=' + hex;
 
   // Use constant-time comparison to prevent timing attacks
+  if (header.length !== expected.length) return false;
   return crypto.timingSafeEqual(
     Buffer.from(header),
     Buffer.from(expected)

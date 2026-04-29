@@ -409,7 +409,7 @@ paths:
 
         ## Payload Verification
 
-        When `webhookSecret` is set, GTalk signs every outbound webhook request using HMAC-SHA256.
+        When `webhookSecret` is set, GTalk signs every outbound webhook request using SHA-256.
 
         **Signature computation:**
         - Input: `oaId + jsonPayload + timestamp + webhookSecret`
@@ -1232,7 +1232,7 @@ components:
           example: "https://swift-comet-37.webhook.cool"
         webhookSecret:
           type: string
-          description: Secret used to sign webhook payloads for verification (HMAC-SHA256)
+          description: Secret used to sign webhook payloads for verification (SHA-256)
           example: "H6kWhg0XGeYTjw6wnPX9"
         webhookResponseTimeoutInSecond:
           type: integer
