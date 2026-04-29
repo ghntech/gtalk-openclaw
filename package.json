@@ -20,6 +20,7 @@
     }
   },
   "dependencies": {
+    "build": "^0.1.4",
     "mime-types": "^2.1.35",
     "sharp": "^0.33.0"
   },
