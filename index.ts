@@ -231,6 +231,22 @@ export default defineChannelPluginEntry({
           let placeholderMsgId: string | null = null;
 
           try {
+            // Record session metadata before dispatching reply
+            // This ensures lastChannel, lastTo, lastAccountId are set for deliveryContext
+            await gtalkRuntime.channel.session.recordInboundSession({
+              storePath: gtalkRuntime.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId }),
+              sessionKey: route.sessionKey,
+              ctx: ctxPayload,
+              updateLastRoute: {
+                sessionKey: route.sessionKey,
+                route: { agentId: route.agentId, channel: "gtalk-openclaw", accountId: "default" },
+                channel: "gtalk-openclaw",
+                to: `gtalk-openclaw:${payload.channelId}`,
+                accountId: "default",
+              },
+              onRecordError: (err: any) => api.logger.warn(`gtalk-openclaw: recordInboundSession error: ${err}`),
+            });
+
             await gtalkRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
               ctx: ctxPayload,
               cfg,
