@@ -165,7 +165,7 @@ export default defineChannelPluginEntry({
             cfg,
             channel,
             accountId: "default",
-            peer: { kind: "direct", id: payload.senderId },
+            peer: { kind: "direct", id: payload.channelId },
           });
 
           if (!route) {
