@@ -160,13 +160,12 @@ export default defineChannelPluginEntry({
           const channel = "gtalk-openclaw";
           const to = `gtalk-openclaw:${payload.channelId}`;
 
-          // Resolve agent route
+          // Resolve agent route — use correct peer structure for dmScope per-channel-peer
           const route = await gtalkRuntime.channel.routing.resolveAgentRoute({
             cfg,
             channel,
-            accountId: null,
-            from: `gtalk-openclaw:${payload.senderId}`,
-            chatType: "direct",
+            accountId: "default",
+            peer: { kind: "direct", id: payload.senderId },
           });
 
           if (!route) {
