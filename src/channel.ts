@@ -85,7 +85,9 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
         const cfg = params.cfg;
         const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
-        const result = await client.sendText(params.to, params.text);
+        // Strip "gtalk-openclaw:" prefix — delivery system passes full "channel:id" format
+        const channelId = String(params.to).replace(/^gtalk-openclaw:/, "");
+        const result = await client.sendText(channelId, params.text);
         return { messageId: result.globalMsgId };
       },
       // Gửi file/ảnh/video — upload 3 bước rồi send
@@ -93,10 +95,12 @@ export const gtalkPlugin = createChatChannelPlugin<ResolvedAccount>({
         const cfg = params.cfg;
         const acc = resolveAccount(cfg, params.accountId);
         const client = new GtalkClient(acc.apiUrl, acc.oaToken);
+        // Strip "gtalk-openclaw:" prefix — delivery system passes full "channel:id" format
+        const channelId = String(params.to).replace(/^gtalk-openclaw:/, "");
         const filePath = (params as any).filePath ?? (params as any).mediaUrl ?? "";
         const caption = (params as any).caption;
         await client.uploadAndSend({
-          channelId: params.to,
+          channelId,
           filePath,
           caption,
         });
