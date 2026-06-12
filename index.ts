@@ -5,14 +5,11 @@ import { GtalkClient, ReceiptStatus } from "./src/client.js";
 import { DEFAULT_MEDIA_TMP_DIR } from "./src/media-dir.js";
 import type { IncomingMessage } from "http";
 
-async function readJsonBody(req: IncomingMessage): Promise<any> {
+async function readRawBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => {
-      try { resolve(data ? JSON.parse(data) : {}); }
-      catch { resolve({}); }
-    });
+    req.on("end", () => { resolve(data); });
     req.on("error", reject);
   });
 }
@@ -37,8 +34,10 @@ export default defineChannelPluginEntry({
       path: "/gtalk-openclaw/webhook",
       auth: "plugin",
       handler: async (req, res) => {
-        const payload = await readJsonBody(req) as GtalkWebhookPayload;
-        const rawBody = JSON.stringify(payload);
+        // Lấy raw body TRƯỚC khi parse để dùng cho signature verification
+        // KHÔNG stringify parsed object vì có thể tạo body khác raw gốc
+        const rawBody = await readRawBody(req);
+        const payload = (rawBody ? JSON.parse(rawBody) : {}) as GtalkWebhookPayload;
 
         const signature = req.headers["x-gtalk-event-signature"] as string;
         // webhookSecret lấy từ channels.gtalk-openclaw.webhookSecret
@@ -427,7 +426,7 @@ export default defineChannelPluginEntry({
       path: "/gtalk-openclaw/setup-channel",
       auth: "plugin",
       handler: async (req, res) => {
-        const body = await readJsonBody(req);
+        const body = JSON.parse(await readRawBody(req));
         const { oaId: oaIdRaw, oaToken: oaTokenParam, userId, webhookUrl } = body as {
           oaId?: string;
           oaToken?: string;

@@ -3,18 +3,11 @@ import { gtalkPlugin } from "./src/channel.js";
 import { verifySignature } from "./src/webhook.js";
 import { GtalkClient, ReceiptStatus } from "./src/client.js";
 import { DEFAULT_MEDIA_TMP_DIR } from "./src/media-dir.js";
-async function readJsonBody(req) {
+async function readRawBody(req) {
     return new Promise((resolve, reject) => {
         let data = "";
         req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => {
-            try {
-                resolve(data ? JSON.parse(data) : {});
-            }
-            catch {
-                resolve({});
-            }
-        });
+        req.on("end", () => { resolve(data); });
         req.on("error", reject);
     });
 }
@@ -35,8 +28,10 @@ export default defineChannelPluginEntry({
             path: "/gtalk-openclaw/webhook",
             auth: "plugin",
             handler: async (req, res) => {
-                const payload = await readJsonBody(req);
-                const rawBody = JSON.stringify(payload);
+                // Lấy raw body TRƯỚC khi parse để dùng cho signature verification
+                // KHÔNG stringify parsed object vì có thể tạo body khác raw gốc
+                const rawBody = await readRawBody(req);
+                const payload = (rawBody ? JSON.parse(rawBody) : {});
                 const signature = req.headers["x-gtalk-event-signature"];
                 // webhookSecret lấy từ channels.gtalk-openclaw.webhookSecret
                 const chanCfgForSecret = api.config?.channels?.["gtalk-openclaw"] ?? {};
@@ -395,7 +390,7 @@ export default defineChannelPluginEntry({
             path: "/gtalk-openclaw/setup-channel",
             auth: "plugin",
             handler: async (req, res) => {
-                const body = await readJsonBody(req);
+                const body = JSON.parse(await readRawBody(req));
                 const { oaId: oaIdRaw, oaToken: oaTokenParam, userId, webhookUrl } = body;
                 if (!oaIdRaw || !userId || !webhookUrl) {
                     res.statusCode = 400;
